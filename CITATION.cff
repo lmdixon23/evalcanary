@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: EvalCanary
+message: If EvalCanary supports published research, cite the software and the exact release used.
+type: software
+authors:
+  - family-names: Dixon
+    given-names: Logan M.
+repository-code: https://github.com/lmdixon23/evalcanary
+license: MIT
+version: 0.1.0
+date-released: 2026-08-05
+abstract: A local-first evaluator migration and regression assurance tool for fixed AI evaluation corpora.
+keywords:
+  - AI evaluation
+  - benchmark reliability
+  - verifier regression
+  - RLVR

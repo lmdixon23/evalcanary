@@ -1,0 +1,7 @@
+[policy]
+min_cases = 10
+max_error_cases = 0
+max_abs_score_delta = 0.50
+max_pass_to_fail = 0
+max_fail_to_pass = 5
+max_changed_cases = 5

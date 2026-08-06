@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible EvalCanary defect using synthetic data.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: State what happened and include the exact command and exit code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal synthetic reproduction
+      description: Do not include private prompts, model outputs, credentials, or benchmark data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: EvalCanary version
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Python and operating-system version
+    validations:
+      required: true

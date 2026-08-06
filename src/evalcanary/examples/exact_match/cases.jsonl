@@ -1,0 +1,12 @@
+{"id":"math-001","input":"2 + 2","expected":"4","output":"4","metadata":{"domain":"math"}}
+{"id":"math-002","input":"6 * 7","expected":"42","output":"42 ","metadata":{"domain":"math"}}
+{"id":"math-003","input":"10 / 2","expected":"5","output":"5","metadata":{"domain":"math"}}
+{"id":"text-001","input":"Return YES","expected":"YES","output":"yes","metadata":{"domain":"text"}}
+{"id":"text-002","input":"Return BLUE","expected":"BLUE","output":"BLUE","metadata":{"domain":"text"}}
+{"id":"text-003","input":"Return CAT","expected":"CAT","output":" cat ","metadata":{"domain":"text"}}
+{"id":"json-001","input":"Return the compact token","expected":"ok","output":"ok","metadata":{"domain":"structured"}}
+{"id":"json-002","input":"Return the compact token","expected":"ready","output":"READY","metadata":{"domain":"structured"}}
+{"id":"code-001","input":"Print hello","expected":"hello","output":"hello","metadata":{"domain":"code"}}
+{"id":"code-002","input":"Print world","expected":"world","output":"world\n","metadata":{"domain":"code"}}
+{"id":"code-003","input":"Print pass","expected":"pass","output":"fail","metadata":{"domain":"code"}}
+{"id":"math-004","input":"3 squared","expected":"9","output":"9","metadata":{"domain":"math"}}

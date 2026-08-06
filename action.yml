@@ -1,0 +1,48 @@
+name: EvalCanary Diff
+description: Compare two trusted Python evaluators against one fixed JSONL corpus.
+author: Logan M. Dixon
+inputs:
+  data:
+    description: Path to the fixed JSONL corpus.
+    required: true
+  before:
+    description: Path to the baseline Python verifier.
+    required: true
+  after:
+    description: Path to the candidate Python verifier.
+    required: true
+  policy:
+    description: Optional TOML policy path.
+    required: false
+    default: ""
+  slice:
+    description: Optional dotted JSON path for one subgroup analysis.
+    required: false
+    default: ""
+  output:
+    description: Output report directory.
+    required: false
+    default: evalcanary-report
+runs:
+  using: composite
+  steps:
+    - name: Install EvalCanary action source
+      shell: bash
+      run: python -m pip install "${{ github.action_path }}"
+    - name: Run evaluator migration comparison
+      shell: bash
+      env:
+        EVALCANARY_DATA: ${{ inputs.data }}
+        EVALCANARY_BEFORE: ${{ inputs.before }}
+        EVALCANARY_AFTER: ${{ inputs.after }}
+        EVALCANARY_POLICY: ${{ inputs.policy }}
+        EVALCANARY_SLICE: ${{ inputs.slice }}
+        EVALCANARY_OUTPUT: ${{ inputs.output }}
+      run: |
+        args=(diff --data "$EVALCANARY_DATA" --before "$EVALCANARY_BEFORE" --after "$EVALCANARY_AFTER" --out "$EVALCANARY_OUTPUT")
+        if [[ -n "$EVALCANARY_POLICY" ]]; then args+=(--policy "$EVALCANARY_POLICY"); fi
+        if [[ -n "$EVALCANARY_SLICE" ]]; then args+=(--slice "$EVALCANARY_SLICE"); fi
+        evalcanary "${args[@]}"
+branding:
+  icon: alert-triangle
+  color: yellow

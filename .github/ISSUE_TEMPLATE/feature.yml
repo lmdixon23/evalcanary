@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a bounded evaluator-reliability capability.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: Evaluator reliability job
+      description: What recurring decision cannot be made with the current product?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Provide a real workflow, synthetic example, or external adoption need.
+    validations:
+      required: true
+  - type: textarea
+    id: smallest
+    attributes:
+      label: Smallest adequate change
+      description: Explain why an adapter, report field, or policy rule is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and failure modes
