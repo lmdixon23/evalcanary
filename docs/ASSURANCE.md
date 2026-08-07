@@ -2,10 +2,10 @@
 
 ## Evidence status
 
-- **Executed:** automated tests and demo commands run in the delivered Linux environment.
-- **Observed:** source tree, reports, packaging, and generated hashes inspected directly.
-- **Inferred:** expected behavior on Windows PowerShell 5.1 from ASCII-only scripts and explicit compatibility design.
-- **Unknown:** Windows 11 execution, GitHub-hosted CI execution, external maintainer demand, and public name clearance.
+- **Executed:** automated tests and demo commands ran in the delivered Linux environment; Windows 11 installation, the 20-test hardening suite, fresh-directory reproducibility, mutation testing, PowerShell 5.1 parsing, ASCII checks, and the Windows demo contract also passed on the maintainer workstation.
+- **Observed:** source tree, reports, packaging, generated hashes, exact local commits, and clean working-tree states were inspected directly.
+- **Unverified until publication:** GitHub repository creation, first push, GitHub-hosted CI, CodeQL, and remote composite-action behavior.
+- **Unknown:** external maintainer demand and final legal or trademark clearance of the public name.
 
 ## Material methods
 
@@ -108,4 +108,6 @@ Possible paths:
 - fresh-directory replay reproduces the canonical report hash on one runtime under `SOURCE_DATE_EPOCH`;
 - package contains no generated reports, secrets, or private data;
 - Windows PowerShell parser and installation gates pass before public release;
+- publication preflight verifies the authenticated owner, clean main branch, explicit expected HEAD, absent origin, remote-name availability, release gates, and Windows verification before any remote mutation;
+- publication verifies the created repository identity, visibility, origin URL, remote main SHA, default branch, and final clean local state;
 - no Critical or unresolved Serious finding remains.

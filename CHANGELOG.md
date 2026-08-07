@@ -20,3 +20,8 @@ All notable changes are documented here. The project follows semantic versioning
 - Python-level verifier console-output protection and finite-score validation.
 - Privacy-preserving report defaults.
 - Exact-match demonstration, GitHub Action, test suite, and release gates.
+
+### Fixed
+
+- Windows PowerShell 5.1 publication root resolution and expected-failure handling.
+- Publication preflight now uses bounded native-process execution, exact-head confirmation, remote-availability discrimination, and post-push verification.
