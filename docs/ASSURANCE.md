@@ -17,6 +17,8 @@ Principal attacks:
 - users may treat changed verdicts as proof that the new evaluator is wrong;
 - subprocess isolation may be mistaken for secure sandboxing;
 - reports may leak proprietary outputs through reasons or details;
+- path or command provenance may leak local directory structure;
+- a run identifier may fail to distinguish different verifier pairs;
 - small paired samples can produce unstable statistical interpretations;
 - package expansion may outrun solo-maintainer capacity.
 
@@ -28,6 +30,7 @@ Controls:
 - explicit epistemic limitations in every report;
 - trusted-code warning in CLI and security documentation;
 - original payload and verifier source exclusion by default;
+- basename-only path provenance and content-derived run identity;
 - deterministic statistics and named methods;
 - demand-gated roadmap and kill conditions;
 - dependency-free runtime.
@@ -70,7 +73,7 @@ Possible paths:
 - reasons or details echo output content;
 - user explicitly includes a source diff containing credentials;
 - output directory is published as a CI artifact;
-- local path reveals internal structure.
+- a basename, reason, or detail reveals internal naming or content.
 
 ## STPA constraints
 
@@ -102,7 +105,7 @@ Possible paths:
 - all unit and integration tests pass;
 - compile check passes;
 - demo produces JSON, Markdown, and HTML;
-- deterministic replay reproduces canonical report hash under `SOURCE_DATE_EPOCH`;
+- fresh-directory replay reproduces the canonical report hash on one runtime under `SOURCE_DATE_EPOCH`;
 - package contains no generated reports, secrets, or private data;
 - Windows PowerShell parser and installation gates pass before public release;
 - no Critical or unresolved Serious finding remains.

@@ -7,7 +7,6 @@ import compileall
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,21 +52,28 @@ def main() -> int:
         )
         pass_items.append("Unit and integration suite passed")
 
-        with tempfile.TemporaryDirectory(prefix="evalcanary-release-") as temp:
-            target = Path(temp) / "demo"
-            run(
-                [
-                    sys.executable,
-                    "-m",
-                    "evalcanary",
-                    "demo",
-                    "--out",
-                    str(target),
-                ],
-                env=env,
-            )
-            report = target / "report" / "report.json"
-            payload = json.loads(report.read_text(encoding="utf-8"))
+        with (
+            tempfile.TemporaryDirectory(prefix="evalcanary-release-a-") as temp_a,
+            tempfile.TemporaryDirectory(prefix="evalcanary-release-b-") as temp_b,
+        ):
+            target_a = Path(temp_a) / "demo"
+            target_b = Path(temp_b) / "demo"
+            for target in (target_a, target_b):
+                run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "evalcanary",
+                        "demo",
+                        "--out",
+                        str(target),
+                    ],
+                    env=env,
+                )
+
+            report_a = target_a / "report" / "report.json"
+            report_b = target_b / "report" / "report.json"
+            payload = json.loads(report_a.read_text(encoding="utf-8"))
             expected = {
                 "total_cases": 12,
                 "error_cases": 0,
@@ -86,26 +92,19 @@ def main() -> int:
                 )
             if not payload["policy"]["passed"]:
                 raise RuntimeError("Demo policy did not pass")
-            first_hash = sha256(report)
-            shutil.rmtree(target)
-            run(
-                [
-                    sys.executable,
-                    "-m",
-                    "evalcanary",
-                    "demo",
-                    "--out",
-                    str(target),
-                ],
-                env=env,
-            )
-            second_hash = sha256(target / "report" / "report.json")
+            serialized = report_a.read_text(encoding="utf-8")
+            if temp_a in serialized or temp_b in serialized:
+                raise RuntimeError("Canonical report leaked a temporary parent path")
+            first_hash = sha256(report_a)
+            second_hash = sha256(report_b)
             if first_hash != second_hash:
                 raise RuntimeError(
-                    "Canonical JSON report was not reproducible under SOURCE_DATE_EPOCH"
+                    "Canonical JSON report was not reproducible across fresh directories "
+                    "under SOURCE_DATE_EPOCH"
                 )
             pass_items.append(
-                f"Demo contract and deterministic report hash passed: {first_hash}"
+                "Demo contract and fresh-directory report reproducibility passed: "
+                f"{first_hash}"
             )
 
         run([sys.executable, "scripts/mutation_gate.py"], env=env)

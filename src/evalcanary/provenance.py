@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import os
 import platform
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from . import __version__
-from .io import sha256_file
+from .io import canonical_json_bytes, sha256_file
+
+_PATH_FLAGS = {
+    "--after",
+    "--before",
+    "--data",
+    "--out",
+    "--policy",
+    "--python",
+    "--verifier",
+}
 
 
 def reproducible_now() -> datetime:
@@ -24,13 +35,41 @@ def reproducible_now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
+def _safe_path_label(value: str | Path) -> str:
+    """Return a basename without leaking an absolute or parent path."""
+
+    raw = str(value)
+    if "\\" in raw or (len(raw) >= 2 and raw[1] == ":"):
+        label = PureWindowsPath(raw).name
+    else:
+        label = Path(raw).name
+    return label or "<path>"
+
+
+def sanitize_command(command: list[str]) -> list[str]:
+    """Redact path-bearing CLI values while retaining command structure."""
+
+    sanitized: list[str] = []
+    redact_next = False
+    for token in command:
+        if redact_next:
+            sanitized.append(_safe_path_label(token))
+            redact_next = False
+            continue
+        sanitized.append(token)
+        redact_next = token in _PATH_FLAGS
+    return sanitized
+
+
 def make_run_id(data_path: Path, before_path: Path, after_path: Path) -> str:
-    combined = (
-        sha256_file(data_path)
-        + sha256_file(before_path)
-        + sha256_file(after_path)
-    )
-    return combined[:16]
+    """Return a stable ID derived from all three content identities."""
+
+    identity = {
+        "after_verifier_sha256": sha256_file(after_path),
+        "before_verifier_sha256": sha256_file(before_path),
+        "data_sha256": sha256_file(data_path),
+    }
+    return hashlib.sha256(canonical_json_bytes(identity)).hexdigest()[:16]
 
 
 def build_provenance(
@@ -44,13 +83,17 @@ def build_provenance(
         "tool": "EvalCanary",
         "tool_version": __version__,
         "report_schema": "evalcanary-comparison-v1",
-        "data": {"path": str(data_path), "sha256": sha256_file(data_path)},
+        "path_policy": "basename-only",
+        "data": {
+            "path": _safe_path_label(data_path),
+            "sha256": sha256_file(data_path),
+        },
         "before_verifier": {
-            "path": str(before_path),
+            "path": _safe_path_label(before_path),
             "sha256": sha256_file(before_path),
         },
         "after_verifier": {
-            "path": str(after_path),
+            "path": _safe_path_label(after_path),
             "sha256": sha256_file(after_path),
         },
         "runtime": {
@@ -58,7 +101,7 @@ def build_provenance(
             "implementation": platform.python_implementation(),
             "platform": platform.platform(),
         },
-        "command": command or [],
+        "command": sanitize_command(command or []),
     }
 
 

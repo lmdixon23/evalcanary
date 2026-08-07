@@ -36,9 +36,15 @@ def verify(case: dict) -> dict:
 Requirements:
 
 - `passed` must be boolean;
-- `score`, when present, must be numeric;
+- `score`, when present, must be a finite number;
 - `reason`, when present, must be a string;
 - `details` must be JSON-serializable.
+
+Python-level writes through `sys.stdout` or `sys.stderr`, including ordinary
+`print`, are captured so they cannot corrupt the worker JSONL protocol. Version
+0.1 does not preserve those captured log streams in the comparison report.
+Low-level file-descriptor writes and output from child processes remain outside
+that control, so verifiers should not emit console output.
 
 ## Errors
 
@@ -48,7 +54,13 @@ Module-import or worker startup failures terminate the run.
 
 ## Execution boundary
 
-The worker process is not a sandbox. Verifiers have the current user's operating-system permissions. Use only trusted code or execute EvalCanary inside an external sandbox.
+The worker process is not a sandbox. Verifiers have the current user's
+operating-system permissions. Use only trusted code or execute EvalCanary inside
+an external sandbox.
+
+`--python` selects the interpreter used to execute the standard-library worker
+file and verifier. The selected interpreter does not need EvalCanary installed,
+but it must support Python 3.11 or later and contain the verifier's dependencies.
 
 ## Determinism guidance
 

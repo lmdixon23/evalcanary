@@ -9,9 +9,12 @@ verifier code you trust.
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import inspect
+import io
 import json
+import math
 import sys
 import time
 import traceback
@@ -60,6 +63,8 @@ def _normalize(case_id: str, value: Any, duration_ms: float) -> dict[str, Any]:
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             raise TypeError("Verifier 'score' must be numeric when provided.")
         score = float(score)
+        if not math.isfinite(score):
+            raise TypeError("Verifier 'score' must be finite when provided.")
     reason = value.get("reason")
     if reason is not None and not isinstance(reason, str):
         raise TypeError("Verifier 'reason' must be a string when provided.")
@@ -76,6 +81,15 @@ def _normalize(case_id: str, value: Any, duration_ms: float) -> dict[str, Any]:
     }
 
 
+def _captured_call(function: Callable[[], Any]) -> Any:
+    """Protect the JSONL protocol from verifier stdout and stderr writes."""
+
+    captured_stdout = io.StringIO()
+    captured_stderr = io.StringIO()
+    with redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
+        return function()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--verifier", required=True)
@@ -83,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     verifier_path = Path(args.verifier).resolve()
 
     try:
-        verify = _load_verify(verifier_path)
+        verify = _captured_call(lambda: _load_verify(verifier_path))
     except Exception as exc:  # pragma: no cover
         print(f"WORKER_STARTUP_ERROR: {exc}", file=sys.stderr)
         return 10
@@ -99,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(case, dict):
                 raise TypeError("Worker input must be a JSON object.")
             case_id = str(case["id"])
-            raw_result = verify(case)
+            raw_result = _captured_call(lambda: verify(case))
             duration_ms = (time.perf_counter() - started) * 1000.0
             result = _normalize(case_id, raw_result, duration_ms)
         except Exception as exc:

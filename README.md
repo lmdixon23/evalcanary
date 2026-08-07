@@ -82,6 +82,8 @@ Outputs:
 Source code is not embedded in reports by default. Add `--include-source-diff`
 only when the verifier files are safe to disclose to the report audience.
 Original case payloads likewise require the separate `--include-content` flag.
+Absolute and parent paths are reduced to basenames in report provenance and
+recorded commands; content hashes provide artifact identity.
 
 ## CI policy
 

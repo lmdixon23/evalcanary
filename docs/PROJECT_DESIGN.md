@@ -128,7 +128,7 @@ This boundary prevents accidental in-process global-state coupling. It does not 
 
 ### Provenance
 
-`evalcanary.provenance` records hashes, paths, tool version, Python version, platform, command, report schema, and a bounded unified source diff.
+`evalcanary.provenance` records content-derived run identity, hashes, basename-only path labels, sanitized command structure, tool version, Python version, platform, report schema, and a bounded unified source diff.
 
 ### Reports
 

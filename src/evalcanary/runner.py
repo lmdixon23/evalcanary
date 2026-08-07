@@ -29,17 +29,18 @@ def run_verifier(
         raise VerifierExecutionError("Timeout must be greater than zero.")
 
     executable = python_executable or sys.executable
+    worker_path = Path(__file__).with_name("worker.py").resolve()
     stdin_data = "".join(
         json.dumps(case.payload, ensure_ascii=False, sort_keys=True) + "\n"
         for case in cases
     )
     env = os.environ.copy()
-    env.setdefault("PYTHONHASHSEED", "0")
-    env.setdefault("TZ", "UTC")
+    env["PYTHONHASHSEED"] = "0"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["TZ"] = "UTC"
     command = [
         executable,
-        "-m",
-        "evalcanary.worker",
+        str(worker_path),
         "--verifier",
         str(verifier_path),
     ]

@@ -13,6 +13,10 @@ All notable changes are documented here. The project follows semantic versioning
 - Dotted-path subgroup analysis.
 - TOML migration policies and CI-safe exit codes.
 - JSON, Markdown, and self-contained accessible HTML reports.
-- Input, verifier, runtime, and command provenance.
+- Input, verifier, runtime, and sanitized command provenance.
+- Content-derived run IDs that distinguish corpus and both verifier versions.
+- Fresh-directory report reproducibility checks and basename-only path privacy.
+- Alternative verifier interpreters that do not require EvalCanary installation.
+- Python-level verifier console-output protection and finite-score validation.
 - Privacy-preserving report defaults.
 - Exact-match demonstration, GitHub Action, test suite, and release gates.
