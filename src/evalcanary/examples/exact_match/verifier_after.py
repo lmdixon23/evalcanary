@@ -1,7 +1,9 @@
 """Whitespace- and case-normalized candidate verifier."""
 
+from typing import Any
 
-def verify(case: dict) -> dict:
+
+def verify(case: dict[str, Any]) -> dict[str, Any]:
     observed = str(case["output"]).strip().casefold()
     expected = str(case["expected"]).strip().casefold()
     passed = observed == expected

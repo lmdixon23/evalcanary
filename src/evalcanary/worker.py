@@ -22,7 +22,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 
 def _load_module(path: Path) -> ModuleType:
@@ -41,7 +41,7 @@ def _load_verify(path: Path) -> Callable[[dict[str, Any]], Any]:
         raise RuntimeError("Verifier must define callable verify(case).")
     if inspect.iscoroutinefunction(verify):
         raise RuntimeError("Async verifier functions are not supported in v0.1.")
-    return verify
+    return cast(Callable[[dict[str, Any]], Any], verify)
 
 
 def _normalize(case_id: str, value: Any, duration_ms: float) -> dict[str, Any]:

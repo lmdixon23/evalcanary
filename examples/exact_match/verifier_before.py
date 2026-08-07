@@ -1,7 +1,9 @@
 """Strict exact-match baseline verifier."""
 
+from typing import Any
 
-def verify(case: dict) -> dict:
+
+def verify(case: dict[str, Any]) -> dict[str, Any]:
     passed = case["output"] == case["expected"]
     return {
         "passed": passed,
