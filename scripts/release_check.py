@@ -218,7 +218,7 @@ def main() -> int:
 
         run([sys.executable, "scripts/mutation_gate.py"], env=env)
         pass_items.append("Mutation gate passed")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         fail_items.append(str(exc))
 
     print()
