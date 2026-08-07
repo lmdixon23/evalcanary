@@ -101,6 +101,10 @@ JSONL fixed corpus
 
 `evalcanary.cli` owns argument validation, exit codes, report destinations, and command composition.
 
+### GitHub Action adapter
+
+The root composite action installs the same package and delegates to `scripts/run_action.py`, which constructs the CLI command without shell interpolation and writes report, run, transition, and policy outputs through `GITHUB_OUTPUT`. The adapter is tested with `uses: ./` on Windows, Linux, and macOS.
+
 ### Input layer
 
 `evalcanary.io` validates JSONL structure, unique identifiers, UTF-8 input, and deterministic hashes.
@@ -307,4 +311,4 @@ Possible later modules:
 - `slice`;
 - `migrate`.
 
-The name remains provisional until package, domain, organization, and trademark checks are completed immediately before public release.
+EvalCanary is now the public working brand. Repository and package-name searches found no material product collision before publication, but the record is not a legal trademark opinion and must be revisited before broader commercial use.

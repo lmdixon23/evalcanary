@@ -10,7 +10,9 @@
 - policy gates;
 - provenance;
 - JSON, Markdown, HTML;
-- local CLI and GitHub Action.
+- local CLI and cross-platform GitHub Action;
+- Python 3.11–3.14 runtime matrix;
+- explicit quality, package, action-smoke, and branch-protection gates.
 
 ## 0.2: Integration evidence
 

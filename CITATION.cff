@@ -8,7 +8,7 @@ authors:
 repository-code: https://github.com/lmdixon23/evalcanary
 license: MIT
 version: 0.1.0
-date-released: 2026-08-05
+date-released: 2026-08-08
 abstract: A local-first evaluator migration and regression assurance tool for fixed AI evaluation corpora.
 keywords:
   - AI evaluation
