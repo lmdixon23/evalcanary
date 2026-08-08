@@ -28,9 +28,17 @@ updates:
     commit-message:
       prefix: deps
     groups:
+      codeql-action-minor-patch:
+        patterns:
+          - "github/codeql-action/*"
+        update-types:
+          - minor
+          - patch
       github-actions-minor-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          - "github/codeql-action/*"
         update-types:
           - minor
           - patch

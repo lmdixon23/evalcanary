@@ -83,7 +83,7 @@ jobs:
           python-version: "3.11"
       - name: Compare evaluator versions
         id: evalcanary
-        uses: lmdixon23/evalcanary@v0.1.0
+        uses: lmdixon23/evalcanary@v0.1.1
         with:
           data: outputs.jsonl
           before: verifier_before.py
