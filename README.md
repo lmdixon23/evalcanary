@@ -37,7 +37,7 @@ new generations.
 
 ## Five-minute local start
 
-Requires Python 3.11 or later. The runtime has no third-party dependencies.
+Requires Python 3.11 or later; v0.1.1 is tested on Python 3.11–3.14. The runtime has no third-party dependencies.
 
 ```console
 git clone https://github.com/lmdixon23/evalcanary.git
@@ -52,9 +52,10 @@ Windows PowerShell:
 ```powershell
 git clone https://github.com/lmdixon23/evalcanary.git
 Set-Location evalcanary
-py -3.11 -m venv .venv
-.venv\Scripts\python.exe scripts\bootstrap_local.py
-.venv\Scripts\evalcanary.cmd demo --out evalcanary-demo
+py --version
+py -m venv .venv
+& .\.venv\Scripts\python.exe .\scripts\bootstrap_local.py
+& .\.venv\Scripts\evalcanary.cmd demo --out .\evalcanary-demo
 ```
 
 Open `evalcanary-demo/report/report.html`.
