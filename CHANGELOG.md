@@ -3,6 +3,16 @@
 All notable changes are documented here. The project follows semantic
 versioning after the v0.x experimental series.
 
+## 0.1.1 - 2026-08-08
+
+### Changed
+
+- Updated CodeQL `init` and `analyze` together to the same reviewed full commit SHA.
+- Migrated package licensing metadata to the PEP 639 SPDX form and raised the
+  Setuptools build-system floor to a version that supports it.
+- Added a dedicated Dependabot group for CodeQL Action sub-actions so future
+  compatible updates are proposed together instead of as mismatched steps.
+
 ## 0.1.0 - 2026-08-08
 
 ### Added
