@@ -9,7 +9,6 @@ verifier code you trust.
 from __future__ import annotations
 
 import argparse
-from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import inspect
 import io
@@ -18,9 +17,12 @@ import math
 import sys
 import time
 import traceback
+from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
+from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any, cast
 
 
 def _load_module(path: Path) -> ModuleType:
@@ -39,7 +41,7 @@ def _load_verify(path: Path) -> Callable[[dict[str, Any]], Any]:
         raise RuntimeError("Verifier must define callable verify(case).")
     if inspect.iscoroutinefunction(verify):
         raise RuntimeError("Async verifier functions are not supported in v0.1.")
-    return verify
+    return cast(Callable[[dict[str, Any]], Any], verify)
 
 
 def _normalize(case_id: str, value: Any, duration_ms: float) -> dict[str, Any]:
@@ -113,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(case, dict):
                 raise TypeError("Worker input must be a JSON object.")
             case_id = str(case["id"])
-            raw_result = _captured_call(lambda: verify(case))
+            raw_result = _captured_call(partial(verify, case))
             duration_ms = (time.perf_counter() - started) * 1000.0
             result = _normalize(case_id, raw_result, duration_ms)
         except Exception as exc:

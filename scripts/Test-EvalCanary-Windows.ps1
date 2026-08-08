@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$ProjectRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,17 +23,40 @@ try {
     }
     Add-Pass ('PowerShell version verified: ' + $PSVersionTable.PSVersion)
 
-    $Tokens = $null
-    $Errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile(
-        $MyInvocation.MyCommand.Path,
-        [ref]$Tokens,
-        [ref]$Errors
-    ) | Out-Null
-    if ($Errors.Count -ne 0) {
-        throw ('PowerShell parser errors: ' + ($Errors | Out-String))
+    if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+        if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            throw 'Unable to resolve the script directory. Supply -ProjectRoot explicitly.'
+        }
+        $ProjectRoot = Split-Path -Parent $PSScriptRoot
     }
-    Add-Pass 'PowerShell parser gate passed'
+    if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) {
+        throw ('Project root does not exist: ' + $ProjectRoot)
+    }
+    $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    Add-Pass ('Project root resolved: ' + $ProjectRoot)
+
+    $Scripts = @(
+        Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scripts') -Filter '*.ps1' -File
+    )
+    if ($Scripts.Count -eq 0) {
+        throw 'No PowerShell scripts were found for the parser gate.'
+    }
+    foreach ($Script in $Scripts) {
+        $Tokens = $null
+        $Errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $Script.FullName,
+            [ref]$Tokens,
+            [ref]$Errors
+        ) | Out-Null
+        if ($Errors.Count -ne 0) {
+            throw (
+                'PowerShell parser errors in ' + $Script.Name + ': ' +
+                ($Errors | Out-String)
+            )
+        }
+    }
+    Add-Pass ('Repository PowerShell parser gate passed: ' + $Scripts.Count)
 
     $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {

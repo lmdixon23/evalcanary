@@ -1,48 +1,133 @@
 name: EvalCanary Diff
 description: Compare two trusted Python evaluators against one fixed JSONL corpus.
 author: Logan M. Dixon
+
 inputs:
   data:
     description: Path to the fixed JSONL corpus.
     required: true
   before:
-    description: Path to the baseline Python verifier.
+    description: Path to the baseline trusted Python verifier.
     required: true
   after:
-    description: Path to the candidate Python verifier.
+    description: Path to the candidate trusted Python verifier.
     required: true
   policy:
     description: Optional TOML policy path.
     required: false
     default: ""
   slice:
-    description: Optional dotted JSON path for one subgroup analysis.
+    description: Optional newline-separated dotted JSON paths for subgroup analysis.
     required: false
     default: ""
   output:
     description: Output report directory.
     required: false
     default: evalcanary-report
+  timeout:
+    description: Total timeout per verifier process in seconds.
+    required: false
+    default: "60"
+  bootstrap_replicates:
+    description: Number of deterministic paired-bootstrap replicates.
+    required: false
+    default: "2000"
+  bootstrap_seed:
+    description: Deterministic paired-bootstrap seed.
+    required: false
+    default: "20260805"
+  python:
+    description: Optional alternative Python executable for verifier subprocesses.
+    required: false
+    default: ""
+  include_content:
+    description: Include original case payloads in report.json.
+    required: false
+    default: "false"
+  include_source_diff:
+    description: Include trusted verifier source text in reports.
+    required: false
+    default: "false"
+
+outputs:
+  report_directory:
+    description: Absolute path to the report directory.
+    value: ${{ steps.diff.outputs.report_directory }}
+  report_json:
+    description: Absolute path to report.json.
+    value: ${{ steps.diff.outputs.report_json }}
+  report_markdown:
+    description: Absolute path to report.md.
+    value: ${{ steps.diff.outputs.report_markdown }}
+  report_html:
+    description: Absolute path to report.html.
+    value: ${{ steps.diff.outputs.report_html }}
+  run_id:
+    description: Content-derived EvalCanary run identifier.
+    value: ${{ steps.diff.outputs.run_id }}
+  changed_cases:
+    description: Number of pass/fail verdict transitions.
+    value: ${{ steps.diff.outputs.changed_cases }}
+  policy_passed:
+    description: true, false, or not-configured.
+    value: ${{ steps.diff.outputs.policy_passed }}
+
 runs:
   using: composite
   steps:
     - name: Install EvalCanary action source
-      shell: bash
-      run: python -m pip install "${{ github.action_path }}"
-    - name: Run evaluator migration comparison
-      shell: bash
+      shell: python
       env:
-        EVALCANARY_DATA: ${{ inputs.data }}
-        EVALCANARY_BEFORE: ${{ inputs.before }}
-        EVALCANARY_AFTER: ${{ inputs.after }}
-        EVALCANARY_POLICY: ${{ inputs.policy }}
-        EVALCANARY_SLICE: ${{ inputs.slice }}
-        EVALCANARY_OUTPUT: ${{ inputs.output }}
+        EVALCANARY_ACTION_PATH: ${{ github.action_path }}
       run: |
-        args=(diff --data "$EVALCANARY_DATA" --before "$EVALCANARY_BEFORE" --after "$EVALCANARY_AFTER" --out "$EVALCANARY_OUTPUT")
-        if [[ -n "$EVALCANARY_POLICY" ]]; then args+=(--policy "$EVALCANARY_POLICY"); fi
-        if [[ -n "$EVALCANARY_SLICE" ]]; then args+=(--slice "$EVALCANARY_SLICE"); fi
-        evalcanary "${args[@]}"
+        import os
+        import subprocess
+        import sys
+
+        raise SystemExit(
+            subprocess.call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                    "--no-input",
+                    os.environ["EVALCANARY_ACTION_PATH"],
+                ]
+            )
+        )
+
+    - name: Run evaluator migration comparison
+      id: diff
+      shell: python
+      env:
+        EVALCANARY_ACTION_PATH: ${{ github.action_path }}
+        EVALCANARY_INPUT_DATA: ${{ inputs.data }}
+        EVALCANARY_INPUT_BEFORE: ${{ inputs.before }}
+        EVALCANARY_INPUT_AFTER: ${{ inputs.after }}
+        EVALCANARY_INPUT_POLICY: ${{ inputs.policy }}
+        EVALCANARY_INPUT_SLICE: ${{ inputs.slice }}
+        EVALCANARY_INPUT_OUTPUT: ${{ inputs.output }}
+        EVALCANARY_INPUT_TIMEOUT: ${{ inputs.timeout }}
+        EVALCANARY_INPUT_BOOTSTRAP_REPLICATES: ${{ inputs.bootstrap_replicates }}
+        EVALCANARY_INPUT_BOOTSTRAP_SEED: ${{ inputs.bootstrap_seed }}
+        EVALCANARY_INPUT_PYTHON: ${{ inputs.python }}
+        EVALCANARY_INPUT_INCLUDE_CONTENT: ${{ inputs.include_content }}
+        EVALCANARY_INPUT_INCLUDE_SOURCE_DIFF: ${{ inputs.include_source_diff }}
+      run: |
+        import os
+        import runpy
+
+        runpy.run_path(
+            os.path.join(
+                os.environ["EVALCANARY_ACTION_PATH"],
+                "scripts",
+                "run_action.py",
+            ),
+            run_name="__main__",
+        )
+
 branding:
   icon: alert-triangle
   color: yellow

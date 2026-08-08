@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import random
+from collections.abc import Iterable
 from decimal import Decimal, localcontext
 from math import comb
-import random
-from typing import Iterable
 
 
 def exact_mcnemar_two_sided(

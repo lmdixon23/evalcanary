@@ -29,6 +29,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
@@ -38,8 +39,8 @@ dependencies = []
 [project.optional-dependencies]
 dev = [
   "build>=1.2,<2",
-  "mypy>=1.11,<2",
-  "pytest>=8,<9",
+  "mypy>=1.11,<3",
+  "pytest>=8,<10",
   "ruff>=0.9,<1",
 ]
 

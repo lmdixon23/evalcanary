@@ -1,8 +1,9 @@
 # Changelog
 
-All notable changes are documented here. The project follows semantic versioning after the v0.x experimental series.
+All notable changes are documented here. The project follows semantic
+versioning after the v0.x experimental series.
 
-## 0.1.0 - 2026-08-05
+## 0.1.0 - 2026-08-08
 
 ### Added
 
@@ -19,9 +20,28 @@ All notable changes are documented here. The project follows semantic versioning
 - Alternative verifier interpreters that do not require EvalCanary installation.
 - Python-level verifier console-output protection and finite-score validation.
 - Privacy-preserving report defaults.
-- Exact-match demonstration, GitHub Action, test suite, and release gates.
+- Exact-match demonstration, test suite, mutation gate, and release checks.
+- Cross-platform composite GitHub Action with report and policy outputs.
+- GitHub-hosted tests on Windows, Linux, and macOS with Python 3.11–3.14.
+- Ruff, mypy, pytest, distribution-build, clean-wheel, and local-action smoke gates.
+- Stable `ci-gate` and `codeql` checks for branch protection.
+
+### Changed
+
+- Updated GitHub-maintained workflow actions to their current major releases
+  and pinned every external action reference to a full commit SHA.
+- Expanded development compatibility to mypy 2.x and pytest 9.x, with those
+  tools now executed in CI rather than merely declared.
+- Grouped future Dependabot minor and patch updates while keeping major updates
+  independently reviewable.
 
 ### Fixed
 
-- Windows PowerShell 5.1 publication root resolution and expected-failure handling.
-- Publication preflight now uses bounded native-process execution, exact-head confirmation, remote-availability discrimination, and post-push verification.
+- Windows PowerShell 5.1 publication root resolution and expected-failure
+  handling.
+- Publication preflight now uses bounded native-process execution, exact-head
+  confirmation, remote-availability discrimination, and post-push verification.
+- Standalone Windows verification now resolves its project root after parameter
+  binding and parses every repository PowerShell script.
+- The GitHub Action no longer depends on Bash and now preserves outputs even
+  when a configured policy fails.

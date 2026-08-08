@@ -7,7 +7,7 @@ import hashlib
 import os
 import platform
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -29,10 +29,10 @@ def reproducible_now() -> datetime:
     source_epoch = os.environ.get("SOURCE_DATE_EPOCH")
     if source_epoch is not None:
         try:
-            return datetime.fromtimestamp(int(source_epoch), tz=timezone.utc)
+            return datetime.fromtimestamp(int(source_epoch), tz=UTC)
         except (ValueError, OSError):
             pass
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _safe_path_label(value: str | Path) -> str:
@@ -125,7 +125,8 @@ def unified_verifier_diff(
     )
     if len(diff) > max_lines:
         omitted = len(diff) - max_lines
-        diff = diff[:max_lines] + [
-            f"... {omitted} additional diff lines omitted ..."
+        diff = [
+            *diff[:max_lines],
+            f"... {omitted} additional diff lines omitted ...",
         ]
     return "\n".join(diff)
