@@ -164,6 +164,25 @@ the report audience. Original case payloads likewise require the separate
 report provenance and recorded commands; content hashes provide artifact
 identity.
 
+## Development: analyze a frozen evaluator migration
+
+The development `migrate` path consumes a strict, data-only assurance artifact.
+It does not import or run evaluators, benchmark tasks, patches, or model output,
+and report generation makes no network request.
+
+```console
+evalcanary migrate \
+  --input evaluator-assurance.jsonl \
+  --contract evaluator-contract.json \
+  --out evaluator-assurance-report
+```
+
+The optional contract uses a closed metric vocabulary and hard, review, or
+informational severities. Output is one canonical JSON model plus fact-parity
+Markdown and accessible, scriptless HTML. Reports are metadata-only by default.
+See the [evaluator-assurance reference](docs/EVALUATOR_ASSURANCE.md) for the
+schema boundary, privacy rules, resource limits, and exit statuses.
+
 ## CI policy
 
 ```toml
@@ -201,6 +220,7 @@ migration analysis. It does not yet provide:
 - [Verifier API](docs/VERIFIER_API.md)
 - [Policy reference](docs/POLICY.md)
 - [Report schema](docs/REPORT_SCHEMA.md)
+- [Evaluator-assurance reference](docs/EVALUATOR_ASSURANCE.md)
 - [Product assurance](docs/ASSURANCE.md)
 - [Release procedure](docs/RELEASING.md)
 - [Roadmap](docs/ROADMAP.md)

@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .assurance.engine import build_report as build_assurance_report
+from .assurance.engine import exit_code_for_report
+from .assurance.renderers import write_report_bundle
+from .assurance.schema import Limits, load_artifact, load_contract
 from .compare import compare_verdicts
 from .errors import EvalCanaryError, InputValidationError
 from .io import load_cases
@@ -19,6 +23,7 @@ from .runner import run_verifier
 EXIT_OK = 0
 EXIT_POLICY_FAIL = 2
 EXIT_ERROR = 3
+EXIT_REVIEW_REQUIRED = 4
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -117,6 +122,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     demo.add_argument(
         "--out", type=Path, default=Path("evalcanary-demo")
+    )
+
+    migrate = sub.add_parser(
+        "migrate",
+        help="Analyze frozen evaluator-assurance JSONL evidence without executing it.",
+    )
+    migrate.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Strict evaluator-assurance-input-v1 JSONL artifact.",
+    )
+    migrate.add_argument(
+        "--contract",
+        type=Path,
+        help="Optional evaluator-assurance-contract-v1 JSON document.",
+    )
+    migrate.add_argument(
+        "--limits",
+        type=Path,
+        help="Optional local bounded resource-limit override document.",
+    )
+    migrate.add_argument(
+        "--out",
+        type=Path,
+        default=Path("evalcanary-assurance-report"),
+        help="Output directory for canonical JSON, Markdown, and HTML.",
     )
 
     return parser
@@ -234,6 +266,29 @@ def _run_demo(args: argparse.Namespace) -> int:
     return _run_diff(demo_args, ["demo"])
 
 
+def _run_migrate(args: argparse.Namespace) -> int:
+    limits = Limits.from_path(args.limits)
+    artifact = load_artifact(args.input, limits=limits)
+    contract = load_contract(args.contract, artifact)
+    report = build_assurance_report(artifact, contract)
+    source_paths = tuple(
+        path for path in (args.input, args.contract, args.limits) if path is not None
+    )
+    write_report_bundle(
+        report,
+        args.out,
+        limits=limits,
+        source_paths=source_paths,
+    )
+    print("EvalCanary evaluator-assurance report")
+    print(f"  evidence: {report['evidence_status']}")
+    print(f"  isolation: {report['isolation_status']}")
+    print(f"  contract: {report['contract_status']}")
+    print(f"  status: {report['report_status']}")
+    print(f"  report: {args.out.resolve()}")
+    return exit_code_for_report(report)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_args = list(sys.argv[1:] if argv is None else argv)
@@ -245,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_validate(args)
         if args.command == "demo":
             return _run_demo(args)
+        if args.command == "migrate":
+            return _run_migrate(args)
         parser.error("Unknown command.")
     except EvalCanaryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
