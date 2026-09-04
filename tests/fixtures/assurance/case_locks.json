@@ -1,0 +1,288 @@
+{
+  "case_a": {
+    "repository": "UKGovernmentBEIS/inspect_evals",
+    "license": "MIT",
+    "baseline_revision": "5989445b8ae86161a2e988a358a09370c5b12994",
+    "candidate_revision": "427d4c805e8aa7ac4d57fd043f0e4bbddeb4a142",
+    "source_files": {
+      "case-a/baseline/scorers.py": "3af2ab5792938acf925fbec4f67afe299379234e95dcc968fcb220e01f52fcd6",
+      "case-a/baseline/test_scorer.py": "fbdb0cc2ec83453cc4e8a7b86791fe50708f1b2f0d0892e1975b9303daeaf766",
+      "case-a/candidate/LICENSE": "c593c2afc81388521eaeb03f0d1a4b01bc3e5147ed9cb16c1f129e5be353b6af",
+      "case-a/candidate/pyproject.toml": "0977652028360ffe00573af68085457040974e15fd3637e08d9ef90746d0ad6b",
+      "case-a/candidate/scorers.py": "9082eecac99b0c9a5a9d9d9bba0d99e894d82b2510964fd252f4155de1c08b5c",
+      "case-a/candidate/test_scorer.py": "954742aae5f095793fa2973bd80f33561eb3bf80be8fa91df82ad4e85efb9cbc",
+      "case-a/candidate/uv.lock": "34f51a1d0f89493c63d036a6edbe3526af97d81acd96ece5def730c30b8fea6c"
+    },
+    "fixtures": [
+      {
+        "case_id": "a-resolved",
+        "text": ">>>>> Start Test Output\nPASSED test_bar\nPASSED test_foo\n>>>>> End Test Output\n",
+        "bytes": 78,
+        "sha256": "fa911f7910c352a1df9aa80a45337b5d654c06f932c359d242e25532800fa4c2",
+        "baseline": ["determinate", "pass"],
+        "candidate": ["determinate", "pass"]
+      },
+      {
+        "case_id": "a-unresolved",
+        "text": ">>>>> Start Test Output\nPASSED test_bar\nFAILED test_foo\n>>>>> End Test Output\n",
+        "bytes": 78,
+        "sha256": "8d67704ed1964618b25bb476ffd7158450ea7ec6407b39edafd494c5775d2160",
+        "baseline": ["determinate", "fail"],
+        "candidate": ["determinate", "fail"]
+      },
+      {
+        "case_id": "a-completed-unparseable",
+        "text": ">>>>> Start Test Output\nImportError: the model broke a module\n>>>>> End Test Output\n",
+        "bytes": 84,
+        "sha256": "b0e0e49bb745b9e1aa12d304bc64db9622faa60ed762d13bcd83031d2ccfaadf",
+        "baseline": ["determinate", "fail"],
+        "candidate": ["determinate", "fail"]
+      },
+      {
+        "case_id": "a-missing-start",
+        "text": "conda: command not found\n",
+        "bytes": 25,
+        "sha256": "5e8626b1c15ea12a443480e94b12e02ca687eedf4bb4c351ede92cc5f8f4c834",
+        "baseline": ["determinate", "fail"],
+        "candidate": ["error", null]
+      },
+      {
+        "case_id": "a-missing-end",
+        "text": ">>>>> Start Test Output\ncollecting tests...\n",
+        "bytes": 44,
+        "sha256": "9d1dec7b2798143f2dd2bdc41585c8b0fff4650b98b036fa103b06d4e545079d",
+        "baseline": ["determinate", "fail"],
+        "candidate": ["error", null]
+      }
+    ]
+  },
+  "case_b": {
+    "repository": "SWE-bench/SWE-bench",
+    "license": "MIT",
+    "baseline_revision": "8d47bf5a27482acb6e4061c6cba204c056aa3b3c",
+    "candidate_revision": "62ad43acd5219d40cf91056e4ba68594cdb1cbc4",
+    "test_spec": "{\"FAIL_TO_PASS\":[\"test_a\"],\"PASS_TO_PASS\":[],\"eval_type\":\"pass_and_fail\",\"instance_id\":\"x__x-1\",\"log_parser\":\"parse_log_pytest\",\"repo\":\"x/x\",\"version\":\"1.0\"}",
+    "test_spec_bytes": 157,
+    "test_spec_sha256": "f1d4c234195ec08730963ef2af88d7798b64d3b3b284e576ca3ed117704dc808",
+    "source_files": {
+      "case-b/baseline/constants.py": "356734173e0229462a97b6621fd7f296710a233b8e8930c40a95a3c21f8b6cd5",
+      "case-b/baseline/grading.py": "81687bdcac2267b5c71b1b799a6388840b3bec0173270c76ef0ff4c7d9384a99",
+      "case-b/baseline/utils.py": "260ad7716f82682c9cd1d4f907150fe427e014b7f63da9eb4b04814e13e1ce66",
+      "case-b/candidate/LICENSE": "2bd2e08df7147f67a69b42c10efae09bd4bf119df397371036187d5dd1b02f57",
+      "case-b/candidate/constants.py": "e28b234918d0e9e8954c969ec9f2ad57930a8e1d82e4d73a1e515f179f6d9650",
+      "case-b/candidate/grading.py": "56c993c8efc88900aeeffce51b7c8b50c5eb8f2a47bffb875f53801f27fbd3f7",
+      "case-b/candidate/test_grading_spoofed_output.py": "3d2614d707f4818f866345c01fb90ac294ba4f41613a60d221520705fa094c1f",
+      "case-b/candidate/utils.py": "d006d266e2ee5dd44749378df38e8bcdfcb1e9793bde3be3d64f81f1f1479575"
+    },
+    "fixtures": [
+      {
+        "case_id": "b-spoof-nonzero",
+        "text": ">>>>> Start Test Output\nPASSED test_a\n>>>>> End Test Output\n>>>>> Test Exit Code: 1\ngit checkout abc123 tests/test_new.py",
+        "bytes": 121,
+        "sha256": "c9e44f8decf4d4e8df069c5ab11584a65c3ef23cc072bfc184d55f45ca940604",
+        "baseline": ["determinate", "pass"],
+        "candidate": ["determinate", "fail"]
+      },
+      {
+        "case_id": "b-genuine-pass",
+        "text": ">>>>> Start Test Output\nPASSED test_a\n>>>>> End Test Output\n>>>>> Test Exit Code: 0\ngit checkout abc123 tests/test_new.py",
+        "bytes": 121,
+        "sha256": "cf5a03e8bb9b6679dd9267ad19b37a67f81e98bf926f68edf54ced966a7d4d04",
+        "baseline": ["determinate", "pass"],
+        "candidate": ["determinate", "pass"]
+      },
+      {
+        "case_id": "b-genuine-fail",
+        "text": ">>>>> Start Test Output\nFAILED test_a\n>>>>> End Test Output\n>>>>> Test Exit Code: 1\ngit checkout abc123 tests/test_new.py",
+        "bytes": 121,
+        "sha256": "e772a538d726611fa0aac0db18654b1e7fb9759763772c92bda99e3320b8252b",
+        "baseline": ["determinate", "fail"],
+        "candidate": ["determinate", "fail"]
+      },
+      {
+        "case_id": "b-reset-fail-control",
+        "text": ">>>>> Start Test Output\nPASSED test_a\n>>>>> End Test Output\n>>>>> Test Exit Code: 0\ngit checkout abc123 tests/test_new.py\nerror: pathspec 'tests/test_new.py' did not match any file(s) known to git\n",
+        "bytes": 197,
+        "sha256": "b6a775b42543df22a4ad94405b857a894d990ed0f6443c0f31db669f477c0212",
+        "baseline": ["determinate", "pass"],
+        "candidate": ["determinate", "pass"]
+      }
+    ]
+  },
+  "case_c": {
+    "dataset": "lmsys/mt_bench_human_judgments",
+    "license": "CC-BY-4.0",
+    "revision": "409e7c9842d35d9b23c30bf136449aa48d064f04",
+    "dataset_url": "https://huggingface.co/datasets/lmsys/mt_bench_human_judgments",
+    "source_paths": {
+      "case-c/gpt4_pair.parquet": "data/gpt4_pair-00000-of-00001-c0b431264a82ddc0.parquet",
+      "case-c/human.parquet": "data/human-00000-of-00001-25f4910818759289.parquet"
+    },
+    "publication_status": "BLOCKED_PENDING_SOURCE_LICENSE_CLARIFICATION",
+    "raw_source": {
+      "repository": "lmsys/mt-bench",
+      "declared_license": "other",
+      "revision": "4d9fe4e99dccb047a157baf7379e926a8943a855",
+      "path": "data/mt_bench/model_judgment/gpt-4_pair.jsonl",
+      "url": "https://huggingface.co/spaces/lmsys/mt-bench/resolve/4d9fe4e99dccb047a157baf7379e926a8943a855/data/mt_bench/model_judgment/gpt-4_pair.jsonl",
+      "bytes": 80342684,
+      "sha256": "d4df8e57466024126ebd88e56598acaf5ea6cf2023b9a67a8475276b09b89db5",
+      "records": 8160,
+      "max_record_bytes": 65536,
+      "required_fields": [
+        "g1_judgment",
+        "g1_user_prompt",
+        "g1_winner",
+        "g2_judgment",
+        "g2_user_prompt",
+        "g2_winner",
+        "judge",
+        "model_1",
+        "model_2",
+        "question_id",
+        "tstamp",
+        "turn"
+      ]
+    },
+    "pair_semantics": {
+      "repository": "lm-sys/FastChat",
+      "license": "Apache-2.0",
+      "revision": "587d5cfa1609a43d192cedb8441cac3c17db105d",
+      "source_paths": {
+        "fastchat-587d5cf-common.py": "fastchat/llm_judge/common.py",
+        "fastchat-587d5cf-compute_agreement.py": "fastchat/llm_judge/compute_agreement.py"
+      },
+      "source_files": {
+        "fastchat-587d5cf-common.py": "71c3b317322845cb05eb6d9b555b03e5084fa59085d24989ce521fcfa8bdc9a7",
+        "fastchat-587d5cf-compute_agreement.py": "458f83de49c2284ee8baf65cfc67c60a46544c00131dea7eab083259467c465b"
+      }
+    },
+    "expected_rows": {
+      "gpt4_pair.parquet": 2400,
+      "human.parquet": 3355
+    },
+    "expected_results": {
+      "selected_groups": 2400,
+      "selected_source_position_first": 0,
+      "selected_source_position_last": 2399,
+      "later_duplicates": 800,
+      "later_duplicate_outcome_changes": 202,
+      "later_duplicate_aggregate_changes": 174,
+      "coverage": {
+        "models": [
+          "alpaca-13b",
+          "claude-v1",
+          "gpt-3.5-turbo",
+          "gpt-4",
+          "llama-13b",
+          "vicuna-13b-v1.2"
+        ],
+        "unordered_model_pairs": 15,
+        "question_ids": 80,
+        "question_id_first": 81,
+        "question_id_last": 160,
+        "groups_by_turn": {"1": 1200, "2": 1200}
+      },
+      "candidate_invariance": {
+        "satisfied": 2020,
+        "violated": 378,
+        "not_evaluable": 2
+      },
+      "aggregate_winners": {
+        "model_a": 190,
+        "model_b": 1610,
+        "tie": 220,
+        "tie (inconsistent)": 380
+      },
+      "human_anchors": {
+        "annotations": 3355,
+        "game_1": 1751,
+        "game_2": 1604,
+        "anchored_ordered_cases": 2396,
+        "missing_ordered_cases": 2404,
+        "anchored_groups": 1814,
+        "missing_groups": 586,
+        "game_1_only_groups": 650,
+        "game_2_only_groups": 582,
+        "both_games_groups": 582,
+        "neither_game_groups": 586,
+        "compatible_agreements": 2210,
+        "compatible_disagreements": 1145,
+        "source_error_annotations": 4
+      }
+    },
+    "decoder": {
+      "name": "pyarrow",
+      "version": "21.0.0",
+      "wheel": "pyarrow-21.0.0-cp313-cp313-win_amd64.whl",
+      "wheel_sha256": "186aa00bca62139f75b7de8420f745f2af12941595bbbfa7ed3870ff63e25636"
+    },
+    "source_files": {
+      "case-c/gpt4_pair.parquet": "57068327ffb5f8fddb15fedbbfe40b26fe862da2326331e5cf64a42320a00e71",
+      "case-c/human.parquet": "4877bc46a40929f4082c3c79593700fb897b1d6c7f4c473032694a01322f5769"
+    },
+    "synthetic_fixtures": [
+      {
+        "fixture_id": "synthetic-preference-stable",
+        "question_id": 1,
+        "turn": 1,
+        "model_1": "synthetic-alpha",
+        "model_2": "synthetic-beta",
+        "g1_winner": "model_2",
+        "g2_winner": "model_2",
+        "expected_candidate_invariance": "satisfied",
+        "anchors": [
+          {"game": 1, "winner": "model_b", "annotator": "synthetic-reviewer-one", "annotation_id": "synthetic-annotation-1"},
+          {"game": 1, "winner": "tie", "annotator": "synthetic-reviewer-two", "annotation_id": "synthetic-annotation-2"},
+          {"game": 2, "winner": "model_a", "annotator": "synthetic-reviewer-one", "annotation_id": "synthetic-annotation-3"}
+        ]
+      },
+      {
+        "fixture_id": "synthetic-position-flip",
+        "question_id": 2,
+        "turn": 1,
+        "model_1": "synthetic-alpha",
+        "model_2": "synthetic-gamma",
+        "g1_winner": "model_1",
+        "g2_winner": "model_2",
+        "expected_candidate_invariance": "violated",
+        "anchors": [
+          {"game": 2, "winner": "model_b", "annotator": "synthetic-reviewer-three", "annotation_id": "synthetic-annotation-4"}
+        ]
+      },
+      {
+        "fixture_id": "synthetic-tie-stable",
+        "question_id": 3,
+        "turn": 1,
+        "model_1": "synthetic-beta",
+        "model_2": "synthetic-gamma",
+        "g1_winner": "tie",
+        "g2_winner": "tie",
+        "expected_candidate_invariance": "satisfied",
+        "anchors": []
+      },
+      {
+        "fixture_id": "synthetic-tie-decisive",
+        "question_id": 4,
+        "turn": 2,
+        "model_1": "synthetic-delta",
+        "model_2": "synthetic-epsilon",
+        "g1_winner": "tie",
+        "g2_winner": "model_2",
+        "expected_candidate_invariance": "violated",
+        "anchors": []
+      },
+      {
+        "fixture_id": "synthetic-source-error",
+        "question_id": 5,
+        "turn": 2,
+        "model_1": "synthetic-delta",
+        "model_2": "synthetic-zeta",
+        "g1_winner": "error",
+        "g2_winner": "model_2",
+        "expected_candidate_invariance": "not_evaluable",
+        "anchors": []
+      }
+    ]
+  }
+}
