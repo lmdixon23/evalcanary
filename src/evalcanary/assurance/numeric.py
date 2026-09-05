@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any
@@ -113,35 +114,49 @@ def fraction_facts(value: Fraction) -> dict[str, int | str | None]:
     }
 
 
+def iter_canonical_json(value: Any) -> Iterator[str]:
+    """Yield locked canonical JSON without materializing the complete document."""
+
+    if value is None:
+        yield "null"
+    elif value is True:
+        yield "true"
+    elif value is False:
+        yield "false"
+    elif isinstance(value, Decimal):
+        yield canonical_decimal(value)
+    elif isinstance(value, int):
+        yield str(value)
+    elif isinstance(value, float):
+        raise TypeError("Binary float is forbidden in assurance canonical JSON.")
+    elif isinstance(value, str):
+        yield json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    elif isinstance(value, list | tuple):
+        yield "["
+        for index, item in enumerate(value):
+            if index:
+                yield ","
+            yield from iter_canonical_json(item)
+        yield "]"
+    elif isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("Canonical JSON object keys must be strings.")
+        yield "{"
+        for index, key in enumerate(sorted(value)):
+            if index:
+                yield ","
+            yield from iter_canonical_json(key)
+            yield ":"
+            yield from iter_canonical_json(value[key])
+        yield "}"
+    else:
+        raise TypeError(f"Unsupported canonical JSON value: {type(value).__name__}")
+
+
 def canonical_json_text(value: Any) -> str:
     """Serialize JSON plus Decimal using the locked canonical form."""
 
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, Decimal):
-        return canonical_decimal(value)
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        raise TypeError("Binary float is forbidden in assurance canonical JSON.")
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    if isinstance(value, list | tuple):
-        return "[" + ",".join(canonical_json_text(item) for item in value) + "]"
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            raise TypeError("Canonical JSON object keys must be strings.")
-        pieces = []
-        for key in sorted(value):
-            pieces.append(
-                canonical_json_text(key) + ":" + canonical_json_text(value[key])
-            )
-        return "{" + ",".join(pieces) + "}"
-    raise TypeError(f"Unsupported canonical JSON value: {type(value).__name__}")
+    return "".join(iter_canonical_json(value))
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -149,4 +164,7 @@ def canonical_json_bytes(value: Any) -> bytes:
 
 
 def canonical_sha256(value: Any) -> str:
-    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+    digest = hashlib.sha256()
+    for chunk in iter_canonical_json(value):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()

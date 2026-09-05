@@ -406,20 +406,40 @@ def _anchor_facts(
             confusion: Counter[str] = Counter()
             comparable = 0
             disagreement = 0
+            selected_role_error = 0
+            selected_role_non_determinate = 0
+            anchor_non_determinate = 0
+            non_unique_selected_role = 0
+            incompatible_label_space = 0
             for anchor in raw:
                 trials = trial_map.get((anchor["case_id"], role), [])
-                if (
-                    compatible
-                    and len(trials) == 1
-                    and trials[0]["status"] == "determinate"
-                    and anchor["status"] == "determinate"
-                ):
-                    comparable += 1
-                    key = f"{anchor['label']}->{trials[0]['label']}"
-                    confusion[key] += 1
-                    disagreement += int(anchor["label"] != trials[0]["label"])
+                if len(trials) != 1:
+                    non_unique_selected_role += 1
+                    continue
+                if trials[0]["status"] != "determinate":
+                    selected_role_non_determinate += 1
+                    selected_role_error += int(trials[0]["status"] == "error")
+                    continue
+                if anchor["status"] != "determinate":
+                    anchor_non_determinate += 1
+                    continue
+                if not compatible:
+                    incompatible_label_space += 1
+                    continue
+                comparable += 1
+                key = f"{anchor['label']}->{trials[0]['label']}"
+                confusion[key] += 1
+                disagreement += int(anchor["label"] != trials[0]["label"])
             roles[role] = {
                 "comparable_raw_annotations": comparable,
+                "non_comparable_raw_annotations": len(raw) - comparable,
+                "selected_role_error_annotations": selected_role_error,
+                "selected_role_non_determinate_annotations": (
+                    selected_role_non_determinate
+                ),
+                "anchor_non_determinate_annotations": anchor_non_determinate,
+                "non_unique_selected_role_annotations": non_unique_selected_role,
+                "incompatible_label_space_annotations": incompatible_label_space,
                 "exact_label_agreements": comparable - disagreement,
                 "exact_label_disagreements": disagreement,
                 "confusion": dict(sorted(confusion.items())),
@@ -856,6 +876,7 @@ def _contract_facts(
                 "operator": rule["operator"],
                 "threshold": rule["threshold"],
                 "missing_evidence": rule["missing_evidence"],
+                "rationale": rule["rationale"],
                 "evidence": outcome.evidence,
             }
         )
@@ -1047,6 +1068,13 @@ def build_report(
             "sanitized_excerpt_tier": "deferred",
         },
         "resource_limits": limits_fact,
+        "resource_usage": {
+            "input_bytes": artifact.input_bytes,
+            "record_count": artifact.record_count,
+            "case_count": len(artifact.cases),
+            "trial_count": len(artifact.trials),
+            "anchor_count": len(artifact.anchors),
+        },
         "warnings": warnings,
         "limitations": list(LIMITATIONS),
     }

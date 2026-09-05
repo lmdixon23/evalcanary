@@ -162,6 +162,74 @@ class AssuranceSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(InputValidationError, "outside the declared domain"):
             self._load(items)
 
+    def test_error_message_uses_fixed_scalar_and_utf8_limits(self) -> None:
+        def with_message(message: str) -> list[dict[str, object]]:
+            items = clone_records()
+            trial = next(
+                item for item in items if item.get("record_type") == "trial"
+            )
+            trial.update(
+                {
+                    "status": "error",
+                    "label": None,
+                    "score": None,
+                    "error": {"error_class": "ParserError", "message": message},
+                }
+            )
+            return items
+
+        accepted = (
+            "a" * 4_095,
+            "a" * 4_096,
+            ("\U0001f600" * 4_095) + "\u20ac",
+            "\U0001f600" * 4_096,
+        )
+        for message in accepted:
+            with self.subTest(scalars=len(message), bytes=len(message.encode("utf-8"))):
+                self._load(with_message(message))
+
+        raised = dict(LIMIT_DEFAULTS)
+        raised["general_string_scalars"] = LIMIT_CEILINGS["general_string_scalars"]
+        raised["general_string_bytes"] = LIMIT_CEILINGS["general_string_bytes"]
+        for message in ("PRIVATE_" + ("a" * 4_089), ("\U0001f600" * 4_096) + "x"):
+            with tempfile.TemporaryDirectory() as temp:
+                path = write_records(Path(temp) / "input.jsonl", with_message(message))
+                with self.subTest(
+                    scalars=len(message), bytes=len(message.encode("utf-8"))
+                ), self.assertRaises(InputValidationError) as caught:
+                    load_artifact(path, limits=Limits(values=raised))
+                self.assertNotIn("PRIVATE_", str(caught.exception))
+                self.assertNotIn(message[:32], str(caught.exception))
+
+    def test_lone_surrogate_in_fixed_source_text_fails_closed(self) -> None:
+        for field in ("reason", "error_message"):
+            items = clone_records()
+            trial = next(item for item in items if item.get("record_type") == "trial")
+            trial["reason"] = "PRIVATE_SURROGATE_SENTINEL"
+            if field == "error_message":
+                trial.update(
+                    {
+                        "status": "error",
+                        "label": None,
+                        "score": None,
+                        "error": {
+                            "error_class": "ParserError",
+                            "message": "PRIVATE_SURROGATE_SENTINEL",
+                        },
+                    }
+                )
+                trial["reason"] = None
+            payload = "\n".join(canonical_json_text(item) for item in items) + "\n"
+            payload = payload.replace("PRIVATE_SURROGATE_SENTINEL", "\\ud800")
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "input.jsonl"
+                path.write_bytes(payload.encode("utf-8"))
+                with self.subTest(field=field), self.assertRaisesRegex(
+                    InputValidationError, "Unicode scalar"
+                ) as caught:
+                    load_artifact(path)
+                self.assertNotIn("PRIVATE_SURROGATE_SENTINEL", str(caught.exception))
+
     def test_trial_identity_source_order_and_pairing_rules(self) -> None:
         items = clone_records()
         trials = [item for item in items if item["record_type"] == "trial"]

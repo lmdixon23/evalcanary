@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import html
+import hashlib
 import os
-import re
 import socket
+import subprocess
 import tempfile
 import unittest
 import urllib.request
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,7 +28,7 @@ from evalcanary.assurance.renderers import (
     markdown_text,
     write_report_bundle,
 )
-from evalcanary.assurance.schema import Limits, load_artifact
+from evalcanary.assurance.schema import Limits, load_artifact, load_contract
 from evalcanary.cli import main
 from evalcanary.errors import InputValidationError
 
@@ -61,35 +62,73 @@ class AssuranceRendererTests(unittest.TestCase):
         canonical = canonical_json_text(report)
         markdown = markdown_text(report)
         rendered_html = html_text(report)
-        markdown_fact = next(
-            line[4:] for line in markdown.splitlines() if line.startswith("    {")
-        )
-        html_match = re.search(r"<pre>(.*?)</pre>", rendered_html, flags=re.DOTALL)
-        self.assertIsNotNone(html_match)
-        self.assertEqual(markdown_fact, canonical)
-        assert html_match is not None
-        self.assertEqual(html.unescape(html_match.group(1)), canonical)
         self.assertEqual(json_bytes(report), canonical.encode("utf-8") + b"\n")
+        canonical_hash = hashlib.sha256(json_bytes(report)).hexdigest()
+        self.assertIn(canonical_hash, markdown)
+        self.assertIn(canonical_hash, rendered_html)
+        self.assertNotIn(canonical, markdown)
+        self.assertNotIn(canonical, rendered_html)
+        self.assertIn("report.json", markdown)
+        self.assertIn("report.json", rendered_html)
+        self.assertIn("displayed", markdown)
+        self.assertIn("omitted", markdown)
         self.assertNotIn("<script", rendered_html.lower())
-        self.assertIsNone(re.search(r"\son[a-z]+\s*=", rendered_html.lower()))
+        self.assertNotIn(" onclick=", rendered_html.lower())
         self.assertIn("Content-Security-Policy", rendered_html)
         self.assertIn("<caption>", rendered_html)
         self.assertIn('scope="col"', rendered_html)
         self.assertIn(":focus-visible", rendered_html)
-        for heading in (
-            "Contract findings",
-            "Critical groups",
-            "Invariance results",
-            "Human-anchor diagnostics",
-            "Repeat and pairing diagnostics",
-            "Provenance completeness",
-            "Limitations",
-            "Canonical facts",
-        ):
+        headings = (
+            "A. Evidence, isolation, contract, and report status",
+            "B. Decision summary",
+            "C. Contract findings",
+            "D. Critical findings",
+            "E. Invariance summary",
+            "F. Human-anchor summary",
+            "G. Provenance and context changes",
+            "H. Bounded detail",
+            "I. Limitations",
+        )
+        for heading in headings:
             self.assertIn(f"## {heading}", markdown)
             self.assertIn(f">{heading}</h2>", rendered_html)
-        self.assertLess(markdown.index("## Contract findings"), markdown.index("## Canonical facts"))
-        self.assertLess(rendered_html.index("Contract findings"), rendered_html.index("Canonical facts"))
+        self.assertEqual(
+            [markdown.index(f"## {heading}") for heading in headings],
+            sorted(markdown.index(f"## {heading}") for heading in headings),
+        )
+        self.assertEqual(
+            [rendered_html.index(f">{heading}</h2>") for heading in headings],
+            sorted(rendered_html.index(f">{heading}</h2>") for heading in headings),
+        )
+
+    def test_contract_projection_is_decision_complete_and_escaped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = load_artifact(
+                write_records(root / "input.jsonl", clone_records())
+            )
+            contract_path = write_json(
+                root / "contract.json",
+                contract(rule("determinate_coverage", parameters={"role": "candidate"})),
+            )
+            loaded_contract = load_contract(contract_path, artifact)
+            assert loaded_contract is not None
+            loaded_contract.document["rules"][0]["rationale"] = "Visible <reason> | `safe`"
+            report = build_report(artifact, loaded_contract)
+        markdown = markdown_text(report)
+        rendered_html = html_text(report)
+        for value in (
+            "rule-determinate_coverage",
+            "hard",
+            "all_cases",
+            "determinate_coverage",
+            "eq",
+            "hard_fail",
+        ):
+            self.assertIn(value, markdown)
+            self.assertIn(value, rendered_html)
+        self.assertIn("Visible &lt;reason&gt; \\| \\`safe\\`", markdown)
+        self.assertIn("Visible &lt;reason&gt; | `safe`", rendered_html)
 
     def test_metadata_only_output_omits_content_secrets_paths_and_annotators(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -133,12 +172,20 @@ class AssuranceRendererTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             report = self._report(root)
-            output = root / "too-large"
-            values = dict(Limits().values)
-            values["json_report_bytes"] = 1
-            with self.assertRaisesRegex(InputValidationError, "json_report_bytes"):
-                write_report_bundle(report, output, limits=Limits(values=values))
-            self.assertFalse(output.exists())
+            for limit_name in (
+                "json_report_bytes",
+                "markdown_report_bytes",
+                "html_report_bytes",
+                "combined_report_bytes",
+            ):
+                output = root / limit_name
+                values = dict(Limits().values)
+                values[limit_name] = 1
+                with self.subTest(limit=limit_name), self.assertRaisesRegex(
+                    InputValidationError, limit_name
+                ):
+                    write_report_bundle(report, output, limits=Limits(values=values))
+                self.assertFalse(output.exists())
 
     def test_source_conflict_file_destination_and_symlink_targets_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -155,10 +202,59 @@ class AssuranceRendererTests(unittest.TestCase):
             destination_file.write_text("occupied", encoding="utf-8")
             with self.assertRaisesRegex(InputValidationError, "not a directory"):
                 write_report_bundle(report, destination_file, limits=Limits())
-            with patch(
-                "pathlib.Path.is_symlink", return_value=True
-            ), self.assertRaisesRegex(InputValidationError, "symbolic link"):
-                write_report_bundle(report, root / "linked", limits=Limits())
+            actual = root / "actual"
+            actual.mkdir()
+            linked = root / "linked"
+            if os.name == "nt":
+                made = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(linked), str(actual)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(made.returncode, 0, made.stderr)
+            else:
+                linked.symlink_to(actual, target_is_directory=True)
+            with self.assertRaisesRegex(
+                InputValidationError, "reparse point|symbolic link"
+            ):
+                write_report_bundle(report, linked / "child", limits=Limits())
+
+    def test_final_target_reparse_and_hardlink_source_alias_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            input_path = write_records(root / "input.jsonl", clone_records())
+            report = build_report(load_artifact(input_path))
+            output = root / "output"
+            output.mkdir()
+            target = output / "report.json"
+            if os.name == "nt":
+                elsewhere = root / "elsewhere"
+                elsewhere.mkdir()
+                made = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(target), str(elsewhere)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(made.returncode, 0, made.stderr)
+            else:
+                elsewhere = root / "elsewhere.json"
+                elsewhere.write_text("untouched", encoding="utf-8")
+                target.symlink_to(elsewhere)
+            with self.assertRaisesRegex(
+                InputValidationError, "reparse point|symbolic link"
+            ):
+                write_report_bundle(report, output, limits=Limits())
+            if target.is_symlink():
+                target.unlink()
+            elif os.name == "nt":
+                os.rmdir(target)
+            os.link(input_path, target)
+            with self.assertRaisesRegex(InputValidationError, "source input"):
+                write_report_bundle(
+                    report, output, limits=Limits(), source_paths=(input_path,)
+                )
 
     def test_write_failure_removes_temporary_sibling(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -167,10 +263,159 @@ class AssuranceRendererTests(unittest.TestCase):
             output = root / "report"
             with patch.object(
                 os, "replace", side_effect=OSError("blocked")
-            ), self.assertRaisesRegex(InputValidationError, "written safely"):
+            ), self.assertRaisesRegex(InputValidationError, "replaced safely"):
                 write_report_bundle(report, output, limits=Limits())
             self.assertEqual(list(output.glob(".*.tmp")), [])
             self.assertEqual(list(output.glob("report.*")), [])
+
+    def test_bundle_discloses_stabilized_sizes_and_stream_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = self._report(root)
+            json_path, markdown_path, html_path = write_report_bundle(
+                report, root / "out", limits=Limits()
+            )
+            json_data = json_path.read_bytes()
+            markdown = markdown_path.read_text(encoding="utf-8")
+            rendered_html = html_path.read_text(encoding="utf-8")
+            expected_hash = hashlib.sha256(json_data).hexdigest()
+            for rendered in (markdown, rendered_html):
+                self.assertIn(expected_hash, rendered)
+                self.assertIn(str(len(json_data)), rendered)
+                self.assertIn(str(markdown_path.stat().st_size), rendered)
+                self.assertIn(str(html_path.stat().st_size), rendered)
+
+    def test_bounded_invariance_projection_uses_exact_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            report = self._report(Path(temp))
+        prototype = report["invariance_groups"][0]
+        outcomes = ["violated"] * 60 + ["not_evaluable"] * 30 + ["satisfied"] * 20
+        groups = []
+        for index, outcome in enumerate(outcomes):
+            item = deepcopy(prototype)
+            item["group_id"] = f"group-{index:04d}"
+            for role in ("baseline", "candidate"):
+                item["roles"][role] = [{"pairing_key": None, "result": outcome}]
+            groups.append(item)
+        report["invariance_groups"] = groups
+        markdown = markdown_text(report)
+        for role in ("baseline", "candidate"):
+            for expected in (
+                f"| invariance {role} violated | 60 | 50 | 10 |",
+                f"| invariance {role} not_evaluable | 30 | 25 | 5 |",
+                f"| invariance {role} satisfied | 20 | 10 | 10 |",
+            ):
+                self.assertIn(expected, markdown)
+        self.assertIn("violated 50, not evaluable 25, satisfied 10", markdown)
+        self.assertNotIn("group-0050", markdown)
+
+    def test_late_critical_regression_is_prioritized_before_detail_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            report = self._report(Path(temp))
+        prototype = report["critical_groups"][0]
+        groups = []
+        for index in range(50):
+            item = deepcopy(prototype)
+            item["group_id"] = f"a-benign-{index:02d}"
+            groups.append(item)
+        regression = deepcopy(prototype)
+        regression["group_id"] = "z-sole-regression"
+        regression["transitions"]["label_transitions"] = {"pass->fail": 1}
+        groups.append(regression)
+        report["critical_groups"] = groups
+        markdown = markdown_text(report)
+        rendered_html = html_text(report)
+        for rendered in (markdown, rendered_html):
+            self.assertIn("z-sole-regression", rendered)
+            self.assertIn("pass-&gt;fail", rendered)
+            self.assertIn("1", rendered)
+        self.assertNotIn("a-benign-49", markdown)
+
+    def test_mapping_evidence_is_bounded_and_json_limit_short_circuits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = self._report(root)
+            report["critical_groups"][0]["transitions"]["label_transitions"] = {
+                f"before-{index}->after-{index}": 1 for index in range(20)
+            }
+            for rendered in (markdown_text(report), html_text(report)):
+                self.assertIn("12 omitted", rendered)
+
+            values = dict(Limits().values)
+            values["json_report_bytes"] = 1
+            from evalcanary.assurance import renderers as renderer_module
+
+            with (
+                patch.object(
+                    renderer_module,
+                    "markdown_text",
+                    side_effect=AssertionError("Markdown must not render"),
+                ),
+                patch.object(
+                    renderer_module,
+                    "html_text",
+                    side_effect=AssertionError("HTML must not render"),
+                ),
+                self.assertRaisesRegex(InputValidationError, "json_report_bytes"),
+            ):
+                write_report_bundle(
+                    report, root / "short-circuit", limits=Limits(values=values)
+                )
+
+    def test_topology_change_simulation_fails_closed_and_cleans_temps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = self._report(root)
+            output = root / "output"
+            from evalcanary.assurance import renderers as renderer_module
+
+            original = renderer_module._assert_directory_topology
+            calls = 0
+
+            def changing(path: Path, expected: object) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 5:
+                    raise InputValidationError(
+                        "Report output topology changed during validation."
+                    )
+                original(path, expected)  # type: ignore[arg-type]
+
+            with patch.object(
+                renderer_module, "_assert_directory_topology", side_effect=changing
+            ), self.assertRaisesRegex(InputValidationError, "topology changed"):
+                write_report_bundle(report, output, limits=Limits())
+            self.assertEqual(list(output.glob(".*.tmp")), [])
+            self.assertEqual(list(output.glob("report.*")), [])
+
+    def test_second_publication_failure_restores_prior_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = self._report(root)
+            output = root / "output"
+            targets = write_report_bundle(report, output, limits=Limits())
+            previous = {target.name: target.read_bytes() for target in targets}
+            changed = deepcopy(report)
+            changed["warnings"] = ["new generation marker"]
+            real_replace = os.replace
+            calls = 0
+
+            def fail_second_publication(source: object, target: object) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 5:
+                    raise OSError("second publication blocked")
+                real_replace(source, target)
+
+            with patch.object(
+                os, "replace", side_effect=fail_second_publication
+            ), self.assertRaisesRegex(InputValidationError, "replaced safely"):
+                write_report_bundle(changed, output, limits=Limits())
+            self.assertEqual(
+                {target.name: target.read_bytes() for target in targets}, previous
+            )
+            self.assertEqual(list(output.glob(".*.tmp")), [])
+            self.assertEqual(list(output.glob(".*.backup")), [])
 
     def test_core_pipeline_attempts_no_network_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

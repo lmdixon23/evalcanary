@@ -107,6 +107,8 @@ class Limits:
 class AssuranceArtifact:
     path: Path
     source_sha256: str
+    input_bytes: int
+    record_count: int
     header: dict[str, Any]
     cases: tuple[dict[str, Any], ...]
     trials: tuple[dict[str, Any], ...]
@@ -227,11 +229,24 @@ def _string(
 ) -> str:
     if not isinstance(value, str) or (not allow_empty and not value):
         raise InputValidationError(f"{field_path} must be a non-empty string.")
+    try:
+        encoded_size = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise InputValidationError(
+            f"{field_path} must contain valid Unicode scalar values."
+        ) from exc
     limits.enforce("general_string_scalars", len(value), field_path=field_path)
-    limits.enforce(
-        "general_string_bytes", len(value.encode("utf-8")), field_path=field_path
-    )
+    limits.enforce("general_string_bytes", encoded_size, field_path=field_path)
     return value
+
+
+def _fixed_source_text(value: Any, field_path: str, limits: Limits) -> str:
+    """Apply the immutable 4,096-scalar and 16-KiB source-text ceiling."""
+
+    text = _string(value, field_path, limits)
+    if len(text) > 4_096 or len(text.encode("utf-8")) > 16_384:
+        raise InputValidationError(f"{field_path} exceeds the fixed v1 source bound.")
+    return text
 
 
 def _identity_string(value: Any, field_path: str, limits: Limits) -> str:
@@ -365,7 +380,9 @@ def _check_shape(
         raise InputValidationError(f"Unsupported JSON scalar at {field_path}.")
 
 
-def _read_jsonl(path: Path, limits: Limits) -> tuple[list[dict[str, Any]], str]:
+def _read_jsonl(
+    path: Path, limits: Limits
+) -> tuple[list[dict[str, Any]], str, int]:
     try:
         if not path.is_file():
             raise InputValidationError("Assurance input file does not exist.")
@@ -413,7 +430,7 @@ def _read_jsonl(path: Path, limits: Limits) -> tuple[list[dict[str, Any]], str]:
         raise
     except OSError as exc:
         raise InputValidationError("Assurance input could not be read safely.") from exc
-    return records, digest.hexdigest()
+    return records, digest.hexdigest(), total_bytes
 
 
 def _validate_component_inventory(header: dict[str, Any], limits: Limits) -> None:
@@ -825,11 +842,7 @@ def _validate_trial(
         if not score_spec["domain_min"] <= numeric <= score_spec["domain_max"]:
             raise InputValidationError("Trial score is outside the declared domain.")
     if obj["reason"] is not None:
-        reason = _string(obj["reason"], f"trial[{index}].reason", limits)
-        if len(reason) > 4_096 or len(reason.encode("utf-8")) > 16_384:
-            raise InputValidationError(
-                "Trial reason exceeds the fixed v1 source bound."
-            )
+        _fixed_source_text(obj["reason"], f"trial[{index}].reason", limits)
     if obj["details"] is not None:
         limits.enforce(
             "details_bytes",
@@ -850,7 +863,9 @@ def _validate_trial(
             )
         message = error_obj.get("message")
         if message is not None:
-            _string(message, f"trial[{index}].error.message", limits)
+            _fixed_source_text(
+                message, f"trial[{index}].error.message", limits
+            )
     elif error is not None:
         raise InputValidationError("Non-error trial must have error=null.")
     _provenance(obj["provenance"], f"trial[{index}].provenance", limits)
@@ -1139,7 +1154,7 @@ def load_artifact(path: Path, *, limits: Limits | None = None) -> AssuranceArtif
     """Parse and validate one normative UTF-8 JSONL assurance artifact."""
 
     effective_limits = limits or Limits()
-    records, source_sha256 = _read_jsonl(path, effective_limits)
+    records, source_sha256, input_bytes = _read_jsonl(path, effective_limits)
     if not records or records[0].get("record_type") != "header":
         raise InputValidationError("The first record must be the sole header.")
     header = _validate_header(records[0], effective_limits)
@@ -1310,6 +1325,8 @@ def load_artifact(path: Path, *, limits: Limits | None = None) -> AssuranceArtif
     return AssuranceArtifact(
         path=path.resolve(),
         source_sha256=source_sha256,
+        input_bytes=input_bytes,
+        record_count=len(records),
         header=header,
         cases=tuple(sorted(cases, key=lambda item: item["manifest_position"])),
         trials=tuple(
@@ -1421,7 +1438,7 @@ def load_contract(
     if not rules:
         raise PolicyConfigurationError("Contract rules must be non-empty.")
     rule_ids: set[str] = set()
-    labels = artifact.header["judgment_spec"]["label_space"] or []
+    labels = artifact.header["judgment_spec"]["label_space"]
     critical_ids = {item["group_id"] for item in artifact.critical_groups}
     invariance_ids = {item["group_id"] for item in artifact.invariance_groups}
     anchor_set_ids = {item["anchor_set_id"] for item in artifact.anchor_sets}
@@ -1490,10 +1507,14 @@ def load_contract(
                 params["status"], STATUSES, f"contract.rules[{index}].parameters.status"
             )
         for name in ("label", "from_label", "to_label"):
-            if name in params and params[name] not in labels:
-                raise PolicyConfigurationError(
-                    "Contract rule label is outside the declared label space."
+            if name in params:
+                label = _label(
+                    params[name], f"contract.rules[{index}].parameters.{name}"
                 )
+                if labels is not None and label not in labels:
+                    raise PolicyConfigurationError(
+                        "Contract rule label is outside the declared label space."
+                    )
         if (
             metric == "critical_regression_count"
             and params["from_label"] == params["to_label"]
