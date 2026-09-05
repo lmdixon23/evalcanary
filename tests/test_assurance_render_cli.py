@@ -56,6 +56,26 @@ class AssuranceRendererTests(unittest.TestCase):
         artifact = load_artifact(write_records(root / "input.jsonl", items))
         return build_report(artifact)
 
+    def _existing_bundle(
+        self, root: Path
+    ) -> tuple[
+        Path,
+        Path,
+        tuple[Path, Path, Path],
+        dict[str, bytes],
+        dict[str, object],
+    ]:
+        report = self._report(root)
+        source = root / "input.jsonl"
+        output = root / "output"
+        targets = write_report_bundle(
+            report, output, limits=Limits(), source_paths=(source,)
+        )
+        previous = {target.name: target.read_bytes() for target in targets}
+        changed = deepcopy(report)
+        changed["warnings"] = ["new generation marker"]
+        return source, output, targets, previous, changed
+
     def test_cross_format_fact_parity_and_accessible_scriptless_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             report = self._report(Path(temp))
@@ -416,6 +436,254 @@ class AssuranceRendererTests(unittest.TestCase):
             )
             self.assertEqual(list(output.glob(".*.tmp")), [])
             self.assertEqual(list(output.glob(".*.backup")), [])
+
+    def test_each_preparation_failure_preserves_prior_bundle(self) -> None:
+        from evalcanary.assurance import renderers as renderer_module
+
+        for failure_at in (1, 2, 3):
+            with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as temp:
+                source, output, targets, previous, changed = self._existing_bundle(
+                    Path(temp)
+                )
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                real_write = renderer_module._write_temporary
+                calls = 0
+
+                def fail_preparation(
+                    *args: object,
+                    _failure_at: int = failure_at,
+                    _real_write: object = real_write,
+                    **kwargs: object,
+                ) -> Path:
+                    nonlocal calls
+                    calls += 1
+                    if calls == _failure_at:
+                        raise InputValidationError("injected preparation failure")
+                    return _real_write(*args, **kwargs)  # type: ignore[operator]
+
+                with patch.object(
+                    renderer_module, "_write_temporary", side_effect=fail_preparation
+                ), self.assertRaisesRegex(
+                    InputValidationError, "injected preparation failure"
+                ):
+                    write_report_bundle(
+                        changed, output, limits=Limits(), source_paths=(source,)
+                    )
+                self.assertEqual(
+                    {target.name: target.read_bytes() for target in targets}, previous
+                )
+                self.assertEqual(
+                    hashlib.sha256(source.read_bytes()).hexdigest(), source_hash
+                )
+                self.assertEqual(list(output.glob(".*.tmp")), [])
+                self.assertEqual(list(output.glob(".*.backup")), [])
+
+    def test_each_publication_failure_restores_prior_bundle(self) -> None:
+        for failure_at in (4, 5, 6):
+            with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as temp:
+                source, output, targets, previous, changed = self._existing_bundle(
+                    Path(temp)
+                )
+                real_replace = os.replace
+                calls = 0
+
+                def fail_publication(
+                    source_path: object,
+                    target_path: object,
+                    _failure_at: int = failure_at,
+                    _real_replace: object = real_replace,
+                ) -> None:
+                    nonlocal calls
+                    calls += 1
+                    if calls == _failure_at:
+                        raise OSError("injected publication failure")
+                    _real_replace(source_path, target_path)  # type: ignore[operator]
+
+                with patch.object(
+                    os, "replace", side_effect=fail_publication
+                ), self.assertRaisesRegex(InputValidationError, "replaced safely"):
+                    write_report_bundle(
+                        changed, output, limits=Limits(), source_paths=(source,)
+                    )
+                self.assertEqual(
+                    {target.name: target.read_bytes() for target in targets}, previous
+                )
+                self.assertEqual(list(output.glob(".*.tmp")), [])
+                self.assertEqual(list(output.glob(".*.backup")), [])
+
+    def test_each_post_publication_validation_failure_restores_prior_bundle(
+        self,
+    ) -> None:
+        from evalcanary.assurance import renderers as renderer_module
+
+        for failed_name in ("report.json", "report.md", "report.html"):
+            with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
+                source, output, targets, previous, changed = self._existing_bundle(
+                    Path(temp)
+                )
+                real_replace = os.replace
+                real_validate = renderer_module._validate_path_chain
+                published: set[str] = set()
+                injected = False
+
+                def observe_publication(
+                    source_path: object,
+                    target_path: object,
+                    _real_replace: object = real_replace,
+                    _published: set[str] = published,
+                ) -> None:
+                    target = Path(target_path)  # type: ignore[arg-type]
+                    source_name = Path(source_path).name  # type: ignore[arg-type]
+                    _real_replace(source_path, target_path)  # type: ignore[operator]
+                    if target.name.startswith("report.") and source_name.endswith(".tmp"):
+                        _published.add(target.name)
+
+                def fail_validation(
+                    path: Path,
+                    *,
+                    leaf_kind: str,
+                    _real_validate: object = real_validate,
+                    _failed_name: str = failed_name,
+                    _published: set[str] = published,
+                ) -> Path:
+                    nonlocal injected
+                    validated = _real_validate(  # type: ignore[operator]
+                        path, leaf_kind=leaf_kind
+                    )
+                    if (
+                        path.name == _failed_name
+                        and path.name in _published
+                        and not injected
+                    ):
+                        injected = True
+                        raise InputValidationError(
+                            "injected post-publication validation failure"
+                        )
+                    return validated
+
+                with (
+                    patch.object(os, "replace", side_effect=observe_publication),
+                    patch.object(
+                        renderer_module,
+                        "_validate_path_chain",
+                        side_effect=fail_validation,
+                    ),
+                    self.assertRaisesRegex(
+                        InputValidationError, "post-publication validation"
+                    ),
+                ):
+                    write_report_bundle(
+                        changed, output, limits=Limits(), source_paths=(source,)
+                    )
+                self.assertTrue(injected)
+                self.assertEqual(
+                    {target.name: target.read_bytes() for target in targets}, previous
+                )
+                self.assertEqual(list(output.glob(".*.tmp")), [])
+                self.assertEqual(list(output.glob(".*.backup")), [])
+
+    def test_each_primary_restore_failure_uses_verified_fallback(self) -> None:
+        for failed_name in ("report.json", "report.md", "report.html"):
+            with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
+                source, output, targets, previous, changed = self._existing_bundle(
+                    Path(temp)
+                )
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                real_replace = os.replace
+                publication_failed = False
+                primary_failed = False
+
+                def fail_publication_and_primary_restore(
+                    source_path: object,
+                    target_path: object,
+                    _failed_name: str = failed_name,
+                    _real_replace: object = real_replace,
+                ) -> None:
+                    nonlocal publication_failed, primary_failed
+                    target = Path(target_path)  # type: ignore[arg-type]
+                    if target.name == "report.md" and not publication_failed:
+                        publication_failed = True
+                        raise OSError("injected Markdown publication failure")
+                    if (
+                        publication_failed
+                        and target.name == _failed_name
+                        and not primary_failed
+                    ):
+                        primary_failed = True
+                        raise OSError("injected primary restore failure")
+                    _real_replace(source_path, target_path)  # type: ignore[operator]
+
+                with patch.object(
+                    os, "replace", side_effect=fail_publication_and_primary_restore
+                ), self.assertRaisesRegex(InputValidationError, "replaced safely"):
+                    write_report_bundle(
+                        changed, output, limits=Limits(), source_paths=(source,)
+                    )
+                self.assertTrue(publication_failed)
+                self.assertTrue(primary_failed)
+                self.assertEqual(
+                    {target.name: target.read_bytes() for target in targets}, previous
+                )
+                self.assertEqual(
+                    hashlib.sha256(source.read_bytes()).hexdigest(), source_hash
+                )
+                self.assertEqual(list(output.glob(".*.tmp")), [])
+                self.assertEqual(list(output.glob(".*.backup")), [])
+
+    def test_secondary_restore_failure_is_explicit_and_retains_backups(self) -> None:
+        for failed_name in ("report.json", "report.md", "report.html"):
+            with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source, output, _, previous, changed = self._existing_bundle(root)
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                real_replace = os.replace
+                publication_failed = False
+                restore_failures = 0
+
+                def fail_publication_and_both_restores(
+                    source_path: object,
+                    target_path: object,
+                    _failed_name: str = failed_name,
+                    _real_replace: object = real_replace,
+                ) -> None:
+                    nonlocal publication_failed, restore_failures
+                    target = Path(target_path)  # type: ignore[arg-type]
+                    if target.name == "report.md" and not publication_failed:
+                        publication_failed = True
+                        raise OSError("injected Markdown publication failure")
+                    if publication_failed and target.name == _failed_name:
+                        restore_failures += 1
+                        if restore_failures <= 2:
+                            raise OSError("injected restore failure")
+                    _real_replace(  # type: ignore[operator]
+                        source_path, target_path
+                    )
+
+                with patch.object(
+                    os, "replace", side_effect=fail_publication_and_both_restores
+                ), self.assertRaisesRegex(
+                    InputValidationError,
+                    f"recovery is incomplete.*{failed_name}.*sha256=",
+                ) as raised:
+                    write_report_bundle(
+                        changed, output, limits=Limits(), source_paths=(source,)
+                    )
+                self.assertNotIn(str(root), str(raised.exception))
+                self.assertEqual(restore_failures, 2)
+                self.assertEqual(
+                    hashlib.sha256(source.read_bytes()).hexdigest(), source_hash
+                )
+                backups = list(output.glob(".*.backup"))
+                self.assertEqual(len(backups), 3)
+                for name, expected_bytes in previous.items():
+                    matching = [
+                        path
+                        for path in backups
+                        if path.name.startswith(f".{name}.")
+                    ]
+                    self.assertEqual(len(matching), 1)
+                    self.assertEqual(matching[0].read_bytes(), expected_bytes)
+                self.assertEqual(list(output.glob(".*.tmp")), [])
 
     def test_core_pipeline_attempts_no_network_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
