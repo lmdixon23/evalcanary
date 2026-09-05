@@ -1218,6 +1218,141 @@ def _json_chunks(report: dict[str, Any]) -> Iterable[bytes]:
     yield b"\n"
 
 
+def _file_size_sha256(path: Path) -> tuple[int, str]:
+    """Hash one validated ordinary file without buffering it in memory."""
+
+    _validate_path_chain(path, leaf_kind="file_or_missing")
+    before = _lstat(path)
+    if before is None or not stat.S_ISREG(before.st_mode):
+        raise InputValidationError(
+            "Report recovery source is not an ordinary local file."
+        )
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino)
+            != (before.st_dev, before.st_ino)
+        ):
+            raise InputValidationError(
+                "Report recovery source changed during validation."
+            )
+        digest = hashlib.sha256()
+        size = 0
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino, after.st_size)
+            != (opened.st_dev, opened.st_ino, opened.st_size)
+            or size != opened.st_size
+        ):
+            raise InputValidationError(
+                "Report recovery source changed while it was read."
+            )
+        return size, digest.hexdigest()
+    except OSError as exc:
+        raise InputValidationError(
+            "Report recovery source could not be read safely."
+        ) from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _file_chunks(path: Path) -> Iterable[bytes]:
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            yield chunk
+
+
+def _verify_file_bytes(path: Path, *, expected_size: int, expected_sha256: str) -> None:
+    actual_size, actual_sha256 = _file_size_sha256(path)
+    if actual_size != expected_size or actual_sha256 != expected_sha256:
+        raise InputValidationError(
+            "Report recovery output does not contain the expected bytes."
+        )
+
+
+def _publish_recovery_copy(
+    target: Path,
+    backup: Path,
+    *,
+    output_directory: Path,
+    topology: _Topology,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    """Copy a backup through a fresh sibling while leaving the backup intact."""
+
+    _assert_directory_topology(output_directory, topology)
+    _validate_path_chain(target, leaf_kind="file_or_missing")
+    _validate_path_chain(backup, leaf_kind="file_or_missing")
+    _verify_file_bytes(
+        backup, expected_size=expected_size, expected_sha256=expected_sha256
+    )
+    temporary = _write_temporary(
+        target,
+        _file_chunks(backup),
+        output_directory=output_directory,
+        topology=topology,
+        expected_size=expected_size,
+        expected_sha256=expected_sha256,
+    )
+    try:
+        _assert_directory_topology(output_directory, topology)
+        _validate_path_chain(backup, leaf_kind="file_or_missing")
+        _verify_file_bytes(
+            backup, expected_size=expected_size, expected_sha256=expected_sha256
+        )
+        _validate_path_chain(temporary, leaf_kind="file_or_missing")
+        _validate_path_chain(target, leaf_kind="file_or_missing")
+        os.replace(temporary, target)
+        _assert_directory_topology(output_directory, topology)
+        _validate_path_chain(target, leaf_kind="file_or_missing")
+        _verify_file_bytes(
+            target, expected_size=expected_size, expected_sha256=expected_sha256
+        )
+    finally:
+        with suppress(OSError):
+            os.unlink(temporary)
+
+
+def _restore_report_member(
+    target: Path,
+    backup: Path,
+    *,
+    output_directory: Path,
+    topology: _Topology,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    """Attempt primary and one fallback recovery without consuming the backup."""
+
+    recovery_error: OSError | InputValidationError | None = None
+    for _ in range(2):
+        try:
+            _publish_recovery_copy(
+                target,
+                backup,
+                output_directory=output_directory,
+                topology=topology,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+            return
+        except (OSError, InputValidationError) as exc:
+            recovery_error = exc
+    raise InputValidationError(
+        "Report member recovery failed after primary and secondary attempts."
+    ) from recovery_error
+
+
 def _stabilized_human_reports(
     report: dict[str, Any], *, json_size: int, json_sha256: str, limits: Limits
 ) -> tuple[bytes, bytes, dict[str, int]]:
@@ -1292,7 +1427,7 @@ def write_report_bundle(
     topology = _capture_directory_topology(output_directory)
     _reject_source_aliases(output_directory, targets, source_paths)
     prepared: list[Path] = []
-    backups: list[tuple[Path, Path]] = []
+    backups: list[tuple[Path, Path, int, str]] = []
     published: list[Path] = []
     preserve_backups = False
     try:
@@ -1331,15 +1466,21 @@ def write_report_bundle(
                     "Report backup destination changed during validation."
                 )
             _reject_source_aliases(output_directory, targets, source_paths)
+            expected_size, expected_sha256 = _file_size_sha256(target)
             try:
                 os.replace(target, backup)
             except OSError as exc:
                 raise InputValidationError(
                     "Existing report bundle could not be staged safely."
                 ) from exc
-            backups.append((target, backup))
+            backups.append((target, backup, expected_size, expected_sha256))
             _assert_directory_topology(output_directory, topology)
             _validate_path_chain(backup, leaf_kind="file_or_missing")
+            _verify_file_bytes(
+                backup,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
         for target, temporary in zip(targets, prepared, strict=True):
             _assert_directory_topology(output_directory, topology)
             _validate_path_chain(target, leaf_kind="file_or_missing")
@@ -1356,24 +1497,38 @@ def write_report_bundle(
             _validate_path_chain(target, leaf_kind="file_or_missing")
     except InputValidationError as exc:
         rollback_error: OSError | InputValidationError | None = None
+        backed_up_targets = {target for target, _, _, _ in backups}
         for target in reversed(published):
+            if target in backed_up_targets:
+                continue
             try:
                 _validate_path_chain(target, leaf_kind="file_or_missing")
                 os.unlink(target)
             except (OSError, InputValidationError) as rollback_exc:
                 rollback_error = rollback_error or rollback_exc
-        for target, backup in reversed(backups):
+        failed_members: list[tuple[Path, Path, str]] = []
+        for target, backup, expected_size, expected_sha256 in reversed(backups):
             try:
-                _assert_directory_topology(output_directory, topology)
-                _validate_path_chain(backup, leaf_kind="file_or_missing")
-                os.replace(backup, target)
-                _validate_path_chain(target, leaf_kind="file_or_missing")
+                _restore_report_member(
+                    target,
+                    backup,
+                    output_directory=output_directory,
+                    topology=topology,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
             except (OSError, InputValidationError) as rollback_exc:
                 rollback_error = rollback_error or rollback_exc
+                failed_members.append((target, backup, expected_sha256))
         if rollback_error is not None:
             preserve_backups = True
+            recovery_details = ", ".join(
+                f"{target.name} (backup={backup.name}, sha256={expected_sha256})"
+                for target, backup, expected_sha256 in failed_members
+            )
             raise InputValidationError(
-                "Report publication failed and the prior bundle could not be rolled back safely."
+                "Report publication failed and report-bundle recovery is incomplete; "
+                f"preserved recovery material: {recovery_details or 'see report backups'}."
             ) from exc
         raise
     finally:
@@ -1381,7 +1536,7 @@ def write_report_bundle(
             with suppress(OSError):
                 os.unlink(temporary)
         if not preserve_backups:
-            for _, backup in backups:
+            for _, backup, _, _ in backups:
                 with suppress(OSError):
                     os.unlink(backup)
     return targets
