@@ -21,6 +21,8 @@ The pull request must pass:
 - strict mypy;
 - pytest and the standard-library unittest suite;
 - sdist and wheel construction;
+- extraction of the sdist into a fresh directory, followed by a fresh
+  environment install and execution of every test shipped in that archive;
 - installation and demo from a clean wheel environment;
 - the local composite-action smoke test on all three operating systems;
 - deterministic fresh-directory report replay;

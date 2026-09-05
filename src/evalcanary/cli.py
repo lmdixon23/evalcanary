@@ -274,6 +274,8 @@ def _run_migrate(args: argparse.Namespace) -> int:
     source_paths = tuple(
         path for path in (args.input, args.contract, args.limits) if path is not None
     )
+    del contract
+    del artifact
     write_report_bundle(
         report,
         args.out,

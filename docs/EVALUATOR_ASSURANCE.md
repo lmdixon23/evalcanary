@@ -20,9 +20,12 @@ evalcanary migrate \
 ```
 
 The output directory contains `report.json`, `report.md`, and `report.html`.
-All three are projections of the same canonical report model. The JSON is
-deterministic UTF-8 without a BOM; Markdown reproduces the canonical facts in a
-code block; HTML is self-contained, accessible, escaped, and scriptless.
+All three are projections of the same canonical report model. The JSON is the
+exhaustive deterministic UTF-8 record without a BOM. Markdown and HTML are
+bounded decision-review projections: they identify the JSON by SHA-256, report
+what detail was displayed or omitted, and retain complete contract decisions
+without embedding the full JSON. HTML is self-contained, accessible, escaped,
+and scriptless.
 
 Exit statuses are:
 
@@ -126,10 +129,21 @@ percent escapes are rejected without dereference.
 
 Input, structure, string, numeric, group, anchor, trial, depth, extension, and
 report sizes are bounded. A local limits document may change only named limits
-within their absolute ceilings. Every renderer and output size is checked before
-an existing report is replaced. Source/output conflicts and symlink traversal
-fail closed; temporary siblings are flushed, atomically replaced, and cleaned
-after failures.
+within their absolute ceilings. Fixed source-text fields, including trial
+reasons and error messages, retain their fixed ceilings even when general
+string limits are raised. Every renderer and output size is checked before an
+existing report is replaced. Source/output aliases, symbolic links, and Windows
+reparse points fail closed. Existing path components are inspected without
+following links; the destination topology is revalidated around exclusive
+temporary-file creation and each atomic replacement. Temporary siblings are
+flushed and synchronized; if later publication fails, already-published files
+are removed and the prior bundle is restored before temporary siblings are
+cleaned.
+
+These checks narrow but cannot eliminate a same-privilege filesystem race:
+another process with permission to replace directory entries can act between a
+successful validation and the following operating-system call. Run assurance
+output in a directory whose parents are not writable by untrusted principals.
 
 ## Deferred boundaries
 

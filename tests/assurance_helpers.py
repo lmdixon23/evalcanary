@@ -309,3 +309,16 @@ def write_json(path: Path, value: dict[str, Any]) -> Path:
 
 def clone_records(**kwargs: Any) -> list[dict[str, Any]]:
     return deepcopy(records(**kwargs))
+
+
+def pure_numeric_records() -> list[dict[str, Any]]:
+    """Return a valid numeric-only artifact with no categorical label space."""
+
+    items = clone_records(relation=None, numeric=True)
+    items[0]["judgment_spec"]["kind"] = "numeric"
+    items[0]["judgment_spec"]["label_space"] = None
+    for item in items:
+        if item.get("record_type") == "trial":
+            item["label"] = None
+    refresh_manifest(items)
+    return items

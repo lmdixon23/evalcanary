@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
+import heapq
 import html
 import os
+import stat
 import uuid
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from ..errors import InputValidationError
-from .numeric import canonical_json_bytes, canonical_json_text
+from .numeric import canonical_json_bytes, canonical_json_text, iter_canonical_json
 from .schema import Limits
+
+_DETAIL_CAPS = {"violated": 50, "not_evaluable": 25, "satisfied": 10}
+_CASE_DETAIL_CAP = 25
+_CRITICAL_DETAIL_CAP = 50
 
 
 def json_bytes(report: dict[str, Any]) -> bytes:
@@ -38,77 +46,355 @@ def _ratio(value: dict[str, Any] | None) -> str:
     return f"{value['numerator']}/{value['denominator']}"
 
 
-def _priority_facts(report: dict[str, Any]) -> dict[str, list[tuple[str, ...]]]:
-    rules: list[tuple[str, ...]] = [
+def _canonical_size_hash(report: dict[str, Any]) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in iter_canonical_json(report):
+        encoded = chunk.encode("utf-8")
+        digest.update(encoded)
+        size += len(encoded)
+    digest.update(b"\n")
+    return size + 1, digest.hexdigest()
+
+
+def _bounded_value(value: Any, *, cap: int = 8) -> str:
+    if isinstance(value, dict):
+        keys = heapq.nsmallest(cap, value)
+        pieces = [
+            f"{key}={_bounded_value(value[key], cap=cap)}" for key in keys
+        ]
+        if len(value) > cap:
+            pieces.append(f"... {len(value) - cap} omitted")
+        return "{" + ", ".join(pieces) + "}"
+    if isinstance(value, list | tuple):
+        shown = [_bounded_value(item, cap=cap) for item in value[:cap]]
+        if len(value) > cap:
+            shown.append(f"... {len(value) - cap} omitted")
+        return "[" + ", ".join(shown) + "]"
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return " ".join(value.splitlines())
+    return canonical_json_text(value)
+
+
+def _display_actual(value: Any) -> str:
+    if isinstance(value, dict) and {"numerator", "denominator"} <= set(value):
+        decimal = value.get("decimal")
+        suffix = "" if decimal is None else f" ({decimal})"
+        return f"{value['numerator']}/{value['denominator']}{suffix}"
+    return _bounded_value(value)
+
+
+def _identity(value: dict[str, Any] | None) -> str:
+    if not isinstance(value, dict):
+        return "not supplied"
+    identity = value.get("identity")
+    if isinstance(identity, str):
+        return identity
+    digest = value.get("identity_sha256") or value.get("declared_sha256")
+    if isinstance(digest, str):
+        return f"omitted; sha256={digest}"
+    return str(value.get("presence", "not supplied"))
+
+
+def _trial_summary(case: dict[str, Any], role: str) -> str:
+    trials = case["trials"][role]
+    statuses = Counter(item["status"] for item in trials)
+    labels = Counter(
+        item["label"]
+        for item in trials
+        if item["status"] == "determinate" and item["label"] is not None
+    )
+    status_text = ", ".join(
+        f"{name}={statuses[name]}"
+        for name in ("determinate", "abstain", "indeterminate", "error")
+    )
+    label_text = ", ".join(f"{name}={count}" for name, count in sorted(labels.items()))
+    return f"total={len(trials)}; {status_text}; labels={label_text or 'n/a'}"
+
+
+def _rule_is_priority(item: dict[str, Any]) -> bool:
+    if item["result"] == "violated":
+        return item["severity"] in {"hard", "review"}
+    if item["result"] in {"missing", "not_applicable"}:
+        return item["missing_evidence"] in {"hard_fail", "review"}
+    return False
+
+
+def _projection_facts(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    rules = sorted(report["rule_results"], key=lambda item: str(item["rule_id"]))
+    rule_rows = [
         (
             str(item["rule_id"]),
             str(item["severity"]),
+            str(item["scope"])
+            + ("" if item["scope_id"] is None else f":{item['scope_id']}"),
             str(item["metric"]),
+            str(item["operator"]),
+            _display_actual(item["threshold"]),
+            _display_actual(item["value"]),
             str(item["result"]),
+            str(item["missing_evidence"]),
+            str(item["rationale"]),
+            _bounded_value(item["evidence"]),
         )
-        for item in report["rule_results"]
+        for item in rules
     ]
-    critical: list[tuple[str, ...]] = []
-    for item in report["critical_groups"]:
-        transitions = item["transitions"]["label_transitions"]
-        critical.append(
+
+    priority_rows: list[tuple[str, ...]] = []
+    for item in rules:
+        if _rule_is_priority(item):
+            policy = (
+                item["severity"]
+                if item["result"] == "violated"
+                else item["missing_evidence"]
+            )
+            priority_rows.append(
+                (
+                    str(policy),
+                    f"contract:{item['rule_id']}",
+                    f"{item['metric']} is {item['result']}",
+                    f"actual={_display_actual(item['value'])}; "
+                    f"{item['operator']} {_display_actual(item['threshold'])}; "
+                    f"evidence={_bounded_value(item['evidence'])}",
+                )
+            )
+    for index, warning in enumerate(report.get("warnings", []), start=1):
+        priority_rows.append(
+            ("review", f"system:{index}", "mandatory system review", str(warning))
+        )
+
+    critical_items = report["critical_groups"]
+
+    def transition_changed(transitions: dict[str, Any]) -> bool:
+        for name, count in transitions.items():
+            before, separator, after = name.partition("->")
+            if separator and before != after and int(count) > 0:
+                return True
+        return False
+
+    def critical_finding(item: dict[str, Any]) -> bool:
+        transitions = item["transitions"]
+        return bool(
+            transition_changed(transitions["status_transitions"])
+            or transition_changed(transitions["label_transitions"])
+            or item["repeat"]["baseline"]["status_distribution"]["error"]
+            or item["repeat"]["candidate"]["status_distribution"]["error"]
+        )
+
+    critical_ranked = sorted(
+        critical_items,
+        key=lambda item: (not critical_finding(item), str(item["group_id"])),
+    )
+    selected_critical = critical_ranked[:_CRITICAL_DETAIL_CAP]
+    finding_count = sum(critical_finding(item) for item in critical_items)
+    selected_finding_count = sum(critical_finding(item) for item in selected_critical)
+    critical_summary = [
+        (
+            str(len(critical_items)),
+            str(
+                sum(
+                    transition_changed(item["transitions"]["status_transitions"])
+                    for item in critical_items
+                )
+            ),
+            str(
+                sum(
+                    transition_changed(item["transitions"]["label_transitions"])
+                    for item in critical_items
+                )
+            ),
+            str(
+                sum(
+                    int(item["repeat"]["baseline"]["status_distribution"]["error"])
+                    for item in critical_items
+                )
+            ),
+            str(
+                sum(
+                    int(item["repeat"]["candidate"]["status_distribution"]["error"])
+                    for item in critical_items
+                )
+            ),
+            str(finding_count),
+            str(len(selected_critical)),
+            str(finding_count - selected_finding_count),
+        )
+    ]
+    critical_rows: list[tuple[str, ...]] = []
+    for item in selected_critical:
+        status_transitions = item["transitions"]["status_transitions"]
+        label_transitions = item["transitions"]["label_transitions"]
+        baseline_errors = item["repeat"]["baseline"]["status_distribution"]["error"]
+        candidate_errors = item["repeat"]["candidate"]["status_distribution"]["error"]
+        critical_rows.append(
             (
                 str(item["group_id"]),
                 str(len(item["member_case_ids"])),
                 str(item["pairing"]["valid_pair_count"]),
-                str(sum(transitions.values())),
+                _bounded_value(status_transitions),
+                _bounded_value(label_transitions),
+                str(baseline_errors),
+                str(candidate_errors),
             )
         )
-    invariance: list[tuple[str, ...]] = []
-    for item in report["invariance_groups"]:
-        for role in ("baseline", "candidate"):
-            counts = Counter(instance["result"] for instance in item["roles"][role])
-            invariance.append(
+        if critical_finding(item):
+            priority_rows.append(
                 (
-                    str(item["group_id"]),
-                    role,
-                    str(counts["satisfied"]),
-                    str(counts["violated"]),
-                    str(counts["not_evaluable"]),
+                    "critical",
+                    f"critical_group:{item['group_id']}",
+                    "declared critical-group transition evidence",
+                    f"status={_bounded_value(status_transitions)}; "
+                    f"labels={_bounded_value(label_transitions)}; "
+                    f"baseline_errors={baseline_errors}; "
+                    f"candidate_errors={candidate_errors}",
                 )
             )
-    anchors: list[tuple[str, ...]] = []
-    for item in report["anchor_sets"]:
+    if finding_count > selected_finding_count:
+        priority_rows.append(
+            (
+                "critical",
+                "critical_group:bounded_omission",
+                f"{finding_count - selected_finding_count} additional critical finding groups are omitted from detail",
+                "Aggregate counts remain in Critical findings; exhaustive identities are in report.json.",
+            )
+        )
+
+    status_rows: list[tuple[str, ...]] = []
+    for role in ("baseline", "candidate"):
+        fact = report["repeat_diagnostics"][role]
+        status = fact["status_distribution"]
+        labels = ", ".join(
+            f"{name}={count}"
+            for name, count in sorted(fact["label_distribution"].items())
+        )
+        status_rows.append(
+            (
+                role,
+                str(fact["trial_count"]),
+                str(fact["determinate_trials"]),
+                str(status["abstain"]),
+                str(status["indeterminate"]),
+                str(status["error"]),
+                _ratio(fact["determinate_coverage"]),
+                labels or "not applicable",
+            )
+        )
+
+    evaluation_rows = []
+    for role in ("baseline", "candidate"):
+        item = report["evaluations"][role]
+        evaluation_rows.append(
+            (
+                role,
+                str(item["evaluation_id"]),
+                str(item["evaluator_id"]),
+                _identity(item["evaluator_version"]),
+                str(item["evaluator_fingerprint_sha256"]),
+                str(item["context_id"]),
+                str(item["context_fingerprint_sha256"]),
+            )
+        )
+
+    invariance_counts = {
+        role: Counter({"satisfied": 0, "violated": 0, "not_evaluable": 0})
+        for role in ("baseline", "candidate")
+    }
+    detail_by_key: dict[tuple[str, str], list[tuple[str, ...]]] = {
+        (role, result): []
+        for role in ("baseline", "candidate")
+        for result in ("violated", "not_evaluable", "satisfied")
+    }
+    for item in sorted(
+        report["invariance_groups"], key=lambda value: str(value["group_id"])
+    ):
+        for role in ("baseline", "candidate"):
+            instances = sorted(
+                item["roles"][role],
+                key=lambda value: ""
+                if value["pairing_key"] is None
+                else str(value["pairing_key"]),
+            )
+            for instance in instances:
+                result = str(instance["result"])
+                invariance_counts[role][result] += 1
+                rows = detail_by_key[(role, result)]
+                if len(rows) < _DETAIL_CAPS[result]:
+                    rows.append(
+                        (
+                            role,
+                            str(item["group_id"]),
+                            result,
+                            str(item["expected_relation"]),
+                            "unkeyed"
+                            if instance["pairing_key"] is None
+                            else str(instance["pairing_key"]),
+                            str(item["severity"]),
+                            _bounded_value(item["member_case_ids"]),
+                        )
+                    )
+    invariance_summary = [
+        (
+            role,
+            str(invariance_counts[role]["satisfied"]),
+            str(invariance_counts[role]["violated"]),
+            str(invariance_counts[role]["not_evaluable"]),
+            str(sum(invariance_counts[role].values())),
+        )
+        for role in ("baseline", "candidate")
+    ]
+    invariance_detail: list[tuple[str, ...]] = []
+    projection_rows: list[tuple[str, ...]] = []
+    for role in ("baseline", "candidate"):
+        for result in ("violated", "not_evaluable", "satisfied"):
+            rows = detail_by_key[(role, result)]
+            invariance_detail.extend(rows)
+            total = invariance_counts[role][result]
+            projection_rows.append(
+                (
+                    f"invariance {role} {result}",
+                    str(total),
+                    str(len(rows)),
+                    str(total - len(rows)),
+                )
+            )
+
+    anchor_rows: list[tuple[str, ...]] = []
+    for item in sorted(report["anchor_sets"], key=lambda value: value["anchor_set_id"]):
         for role in ("baseline", "candidate"):
             role_fact = item["roles"][role]
-            anchors.append(
+            anchor_rows.append(
                 (
                     str(item["anchor_set_id"]),
                     role,
-                    _ratio(item["coverage"]),
                     str(item["raw_annotation_count"]),
+                    str(item["covered_case_count"]),
+                    str(item["cluster_count"]),
+                    str(role_fact["comparable_raw_annotations"]),
+                    str(role_fact["non_comparable_raw_annotations"]),
+                    str(role_fact["selected_role_error_annotations"]),
+                    str(role_fact["selected_role_non_determinate_annotations"]),
+                    str(role_fact["anchor_non_determinate_annotations"]),
+                    str(role_fact["non_unique_selected_role_annotations"]),
+                    str(role_fact["incompatible_label_space_annotations"]),
                     str(role_fact["exact_label_agreements"]),
                     str(role_fact["exact_label_disagreements"]),
                 )
             )
-    repeat: list[tuple[str, ...]] = []
-    for role in ("baseline", "candidate"):
-        fact = report["repeat_diagnostics"][role]
-        cases = fact["cases"]
-        repeat.append(
-            (
-                role,
-                str(fact["trial_count"]),
-                _ratio(fact["determinate_coverage"]),
-                str(sum(bool(item["status_instability"]) for item in cases)),
-                str(sum(bool(item["label_instability"]) for item in cases)),
-                str(sum(item["score_instability"] is True for item in cases)),
-            )
-        )
-    deltas = list(report["provenance"]["evaluation_delta"].values()) + list(
-        report["provenance"]["component_delta"].values()
-    )
-    provenance_counts = Counter(item["delta"] for item in deltas)
-    provenance: list[tuple[str, ...]] = [
-        (
-            str(provenance_counts[name]),
-            name,
-        )
+
+    deltas = {
+        **{
+            f"evaluation.{name}": item
+            for name, item in report["provenance"]["evaluation_delta"].items()
+        },
+        **report["provenance"]["component_delta"],
+    }
+    provenance_counts = Counter(item["delta"] for item in deltas.values())
+    provenance_summary = [
+        (name, str(provenance_counts[name]))
         for name in (
             "same",
             "changed",
@@ -118,17 +404,87 @@ def _priority_facts(report: dict[str, Any]) -> dict[str, list[tuple[str, ...]]]:
             "omitted",
         )
     ]
+    provenance_rows = [
+        (
+            name,
+            str(item["delta"]),
+            str(item["baseline_presence"]),
+            str(item["candidate_presence"]),
+        )
+        for name, item in sorted(deltas.items())
+        if item["delta"] != "same"
+    ]
+    context_rows = [
+        (str(item["component"]), str(item["finding"]))
+        for item in report["isolation_findings"]
+    ]
+
+    all_cases = report["cases"]
+    cases = heapq.nsmallest(
+        _CASE_DETAIL_CAP, all_cases, key=lambda item: str(item["case_id"])
+    )
+    case_rows = [
+        (
+            str(item["case_id"]),
+            _bounded_value(item["critical_group_ids"]),
+            _bounded_value(item["invariance_group_ids"]),
+            _trial_summary(item, "baseline"),
+            _trial_summary(item, "candidate"),
+        )
+        for item in cases
+    ]
+    projection_rows.extend(
+        (
+            (
+                "critical groups",
+                str(len(critical_items)),
+                str(len(critical_rows)),
+                str(len(critical_items) - len(critical_rows)),
+            ),
+            (
+                "case summaries",
+                str(len(all_cases)),
+                str(len(case_rows)),
+                str(len(all_cases) - len(case_rows)),
+            ),
+        )
+    )
+    displayed = sum(int(item[2]) for item in projection_rows)
+    omitted = sum(int(item[3]) for item in projection_rows)
     return {
-        "rules": rules,
-        "critical": critical,
-        "invariance": invariance,
-        "anchors": anchors,
-        "repeat": repeat,
-        "provenance": provenance,
+        "rules": rule_rows,
+        "priority": priority_rows,
+        "critical_summary": critical_summary,
+        "critical": critical_rows,
+        "status": status_rows,
+        "evaluations": evaluation_rows,
+        "invariance_summary": invariance_summary,
+        "invariance_detail": invariance_detail,
+        "anchors": anchor_rows,
+        "provenance_summary": provenance_summary,
+        "provenance_detail": provenance_rows,
+        "context": context_rows,
+        "cases": case_rows,
+        "projection": projection_rows,
+        "displayed_detail_rows": displayed,
+        "omitted_detail_rows": omitted,
     }
 
 
-def _markdown_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
+def _markdown_cell(value: Any) -> str:
+    text = " ".join(str(value).splitlines())
+    return (
+        text.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("`", "\\`")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _markdown_table(
+    headers: tuple[str, ...], rows: Sequence[tuple[str, ...]]
+) -> list[str]:
     if not rows:
         return ["No evidence was declared for this section.", ""]
     lines = [
@@ -136,95 +492,278 @@ def _markdown_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> li
         "| " + " | ".join("---" for _ in headers) + " |",
     ]
     for row in rows:
-        lines.append("| " + " | ".join(f"`{value}`" for value in row) + " |")
+        lines.append("| " + " | ".join(_markdown_cell(value) for value in row) + " |")
     lines.append("")
     return lines
 
 
-def markdown_text(report: dict[str, Any]) -> str:
-    canonical = canonical_json_text(report)
-    facts = _priority_facts(report)
+def _resource_rows(
+    report: dict[str, Any], report_sizes: dict[str, int] | None
+) -> list[tuple[str, str]]:
+    usage = report.get("resource_usage", {})
+    limits = report.get("resource_limits", {})
+    sizes = report_sizes or {}
+    return [
+        ("Input bytes", str(usage.get("input_bytes", "not recorded"))),
+        ("Input records", str(usage.get("record_count", "not recorded"))),
+        ("Cases", str(usage.get("case_count", len(report.get("cases", []))))),
+        ("Trials", str(usage.get("trial_count", "not recorded"))),
+        ("Anchors", str(usage.get("anchor_count", "not recorded"))),
+        ("Canonical JSON bytes", str(sizes.get("json_report_bytes", "not measured"))),
+        ("Markdown bytes", str(sizes.get("markdown_report_bytes", "not measured"))),
+        ("HTML bytes", str(sizes.get("html_report_bytes", "not measured"))),
+        ("Non-default limits", "yes" if limits.get("nondefault") else "no"),
+        ("Limit overrides", _bounded_value(limits.get("overrides", {}))),
+    ]
+
+
+def markdown_text(
+    report: dict[str, Any],
+    *,
+    canonical_json_sha256: str | None = None,
+    report_sizes: dict[str, int] | None = None,
+) -> str:
+    if canonical_json_sha256 is None:
+        _, canonical_json_sha256 = _canonical_size_hash(report)
+    facts = _projection_facts(report)
+    status_rows = [
+        ("Evidence", str(report["evidence_status"])),
+        ("Isolation", str(report["isolation_status"])),
+        ("Contract", str(report["contract_status"])),
+        ("Overall report", str(report["report_status"])),
+    ]
+    input_fact = report["input"]
+    corpus = report["corpus"]
+    identity_rows = [
+        ("Report ID", str(report["report_id"])),
+        ("Artifact ID", str(input_fact["artifact_id"])),
+        ("Input SHA-256", str(input_fact["source_sha256"])),
+        ("Corpus ID", str(corpus["corpus_id"])),
+        ("Corpus identity level", str(corpus["identity_level"])),
+        ("Declared case count", str(corpus["case_count"])),
+        ("Manifest SHA-256", str(corpus["computed_manifest_sha256"])),
+    ]
+    contract = report.get("contract")
+    if contract is not None:
+        identity_rows.extend(
+            [
+                ("Contract ID", str(contract["contract_id"])),
+                ("Contract version", str(contract["contract_version"])),
+                ("Contract SHA-256", str(contract["source_sha256"])),
+            ]
+        )
     lines = [
         "# EvalCanary evaluator-assurance report",
         "",
-        f"- Report ID: `{report['report_id']}`",
-        f"- Evidence status: **{report['evidence_status']}**",
-        f"- Isolation status: **{report['isolation_status']}**",
-        f"- Contract status: **{report['contract_status']}**",
-        f"- Report status: **{report['report_status']}**",
+        "Contract-bound evidence for a frozen evaluator migration. This report does not decide which evaluator is correct.",
         "",
-        "## Priority findings",
+        "## A. Evidence, isolation, contract, and report status",
         "",
     ]
-    warnings = report.get("warnings", [])
-    lines.extend(f"- {str(item).replace(chr(10), ' ')}" for item in warnings)
-    if not warnings:
-        lines.append("- No system review warning was emitted.")
-    lines.extend(["", "## Contract findings", ""])
+    lines.extend(_markdown_table(("Dimension", "Value"), status_rows))
+    lines.extend(["## B. Decision summary", ""])
+    if facts["priority"]:
+        lines.extend(
+            _markdown_table(
+                ("Policy", "Finding", "Summary", "Decision evidence"),
+                facts["priority"],
+            )
+        )
+    else:
+        lines.extend(
+            [
+                "No hard contract, mandatory system-review, or critical-group finding was emitted.",
+                "",
+            ]
+        )
     lines.extend(
         _markdown_table(
-            ("Rule", "Severity", "Metric", "Result"), facts["rules"]
+            (
+                "Role",
+                "Trials",
+                "Determinate",
+                "Abstain",
+                "Indeterminate",
+                "Error",
+                "Determinate coverage",
+                "Determinate labels",
+            ),
+            facts["status"],
         )
     )
-    lines.extend(["## Critical groups", ""])
-    lines.extend(
-        _markdown_table(
-            ("Group", "Cases", "Valid pairs", "Label transitions"),
-            facts["critical"],
-        )
-    )
-    lines.extend(["## Invariance results", ""])
-    lines.extend(
-        _markdown_table(
-            ("Group", "Role", "Satisfied", "Violated", "Not evaluable"),
-            facts["invariance"],
-        )
-    )
-    lines.extend(["## Human-anchor diagnostics", ""])
-    lines.extend(
-        _markdown_table(
-            ("Anchor set", "Role", "Coverage", "Raw", "Agree", "Disagree"),
-            facts["anchors"],
-        )
-    )
-    lines.extend(["## Repeat and pairing diagnostics", ""])
-    lines.extend(
-        _markdown_table(
-            ("Role", "Trials", "Coverage", "Status unstable", "Label unstable", "Score unstable"),
-            facts["repeat"],
-        )
-    )
+    lines.extend(_markdown_table(("Resource", "Observed"), _resource_rows(report, report_sizes)))
     pairing = report["pairing"]
-    lines.append(
-        f"Overall valid pairing coverage is `{_ratio(pairing['pairing_coverage'])}`; "
-        f"incomplete cases: `{len(pairing['incomplete_case_ids'])}`."
-    )
-    lines.extend(["", "## Provenance completeness", ""])
-    lines.extend(_markdown_table(("Fields", "Delta"), facts["provenance"]))
-    links = _safe_links(report)
-    if links:
-        lines.extend(["", "## Typed public references", ""])
-        for label, target in links:
-            if not any(character in target for character in '<>"'):
-                lines.append(f"- [{label}](<{target}>)")
-    lines.extend(["", "## Limitations", ""])
-    lines.extend(f"- {item}" for item in report["limitations"])
     lines.extend(
         [
+            f"Overall valid pairing coverage is `{_ratio(pairing['pairing_coverage'])}`; incomplete cases: `{len(pairing['incomplete_case_ids'])}`.",
             "",
-            "## Canonical facts",
-            "",
-            "Every material fact in the canonical JSON report is reproduced below.",
+            "## C. Contract findings",
             "",
         ]
     )
-    lines.extend("    " + line for line in canonical.splitlines() or [canonical])
+    lines.extend(
+        _markdown_table(
+            (
+                "Rule",
+                "Severity",
+                "Scope",
+                "Metric",
+                "Operator",
+                "Threshold",
+                "Actual",
+                "Result",
+                "Missing-evidence policy",
+                "Rationale",
+                "Bounded evidence",
+            ),
+            facts["rules"],
+        )
+    )
+    lines.extend(["## D. Critical findings", ""])
+    lines.extend(
+        _markdown_table(
+            (
+                "Groups",
+                "With status transitions",
+                "With label transitions",
+                "Baseline errors",
+                "Candidate errors",
+                "Finding groups",
+                "Detail displayed",
+                "Finding groups omitted",
+            ),
+            facts["critical_summary"],
+        )
+    )
+    lines.extend(
+        _markdown_table(
+            (
+                "Group",
+                "Members",
+                "Valid pairs",
+                "Status transitions",
+                "Label transitions",
+                "Baseline errors",
+                "Candidate errors",
+            ),
+            facts["critical"],
+        )
+    )
+    lines.extend(["## E. Invariance summary", ""])
+    lines.extend(
+        _markdown_table(
+            ("Role", "Satisfied", "Violated", "Not evaluable", "Total"),
+            facts["invariance_summary"],
+        )
+    )
+    lines.extend(
+        [
+            "Bounded detail caps per role are: violated 50, not evaluable 25, satisfied 10.",
+            "",
+            "## F. Human-anchor summary",
+            "",
+        ]
+    )
+    lines.extend(
+        _markdown_table(
+            (
+                "Anchor set",
+                "Role",
+                "Raw annotations",
+                "Covered cases",
+                "Clusters",
+                "Comparable raw",
+                "Non-comparable raw",
+                "Role errors excluded",
+                "Role non-determinate excluded",
+                "Anchor non-determinate excluded",
+                "Non-unique role selections excluded",
+                "Incompatible label spaces excluded",
+                "Agreements",
+                "Disagreements",
+            ),
+            facts["anchors"],
+        )
+    )
+    lines.extend(["## G. Provenance and context changes", ""])
+    lines.extend(_markdown_table(("Identity", "Value"), identity_rows))
+    lines.extend(
+        _markdown_table(
+            (
+                "Role",
+                "Evaluation",
+                "Evaluator",
+                "Evaluator version",
+                "Evaluator fingerprint",
+                "Context",
+                "Context fingerprint",
+            ),
+            facts["evaluations"],
+        )
+    )
+    lines.extend(
+        _markdown_table(
+            ("Delta state", "Count"), facts["provenance_summary"]
+        )
+    )
+    lines.extend(
+        _markdown_table(
+            ("Field", "Delta", "Baseline presence", "Candidate presence"),
+            facts["provenance_detail"],
+        )
+    )
+    lines.extend(_markdown_table(("Component", "Isolation finding"), facts["context"]))
+    links = _safe_links(report)
+    if links:
+        lines.extend(["Typed public references:", ""])
+        for label, target in links:
+            if not any(character in target for character in '<>"'):
+                lines.append(f"- [{label}](<{target}>)")
+    lines.extend(
+        [
+            "",
+            "## H. Bounded detail",
+            "",
+            "The companion `report.json` is the exhaustive canonical record. Human projections deliberately omit repetitive rows.",
+            f"Canonical JSON SHA-256: `{canonical_json_sha256}`.",
+            f"Bounded detail rows displayed: `{facts['displayed_detail_rows']}`; omitted: `{facts['omitted_detail_rows']}`.",
+            "",
+        ]
+    )
+    lines.extend(
+        _markdown_table(
+            ("Detail population", "Total", "Displayed", "Omitted"),
+            facts["projection"],
+        )
+    )
+    lines.extend(
+        _markdown_table(
+            (
+                "Role",
+                "Group",
+                "Result",
+                "Expected relation",
+                "Pairing key",
+                "Severity",
+                "Member cases",
+            ),
+            facts["invariance_detail"],
+        )
+    )
+    lines.extend(
+        _markdown_table(
+            ("Case", "Critical groups", "Invariance groups", "Baseline", "Candidate"),
+            facts["cases"],
+        )
+    )
+    lines.extend(["## I. Limitations", ""])
+    lines.extend(f"- {_markdown_cell(item)}" for item in report["limitations"])
     lines.append("")
     return "\n".join(lines)
 
 
 def _html_table(
-    caption: str, headers: tuple[str, ...], rows: list[tuple[str, ...]]
+    caption: str, headers: tuple[str, ...], rows: Sequence[tuple[str, ...]]
 ) -> str:
     head = "".join(f'<th scope="col">{html.escape(item)}</th>' for item in headers)
     if rows:
@@ -252,14 +791,15 @@ def _html_table(
     )
 
 
-def html_text(report: dict[str, Any]) -> str:
-    canonical = html.escape(canonical_json_text(report))
-    facts = _priority_facts(report)
-    warnings = "".join(
-        f"<li>{html.escape(str(item))}</li>" for item in report.get("warnings", [])
-    )
-    if not warnings:
-        warnings = "<li>No system review warning was emitted.</li>"
+def html_text(
+    report: dict[str, Any],
+    *,
+    canonical_json_sha256: str | None = None,
+    report_sizes: dict[str, int] | None = None,
+) -> str:
+    if canonical_json_sha256 is None:
+        _, canonical_json_sha256 = _canonical_size_hash(report)
+    facts = _projection_facts(report)
     limitations = "".join(
         f"<li>{html.escape(str(item))}</li>" for item in report["limitations"]
     )
@@ -270,33 +810,184 @@ def html_text(report: dict[str, Any]) -> str:
         )
         or "<li>No reportable public reference was supplied.</li>"
     )
+    status_table = _html_table(
+        "Status",
+        ("Dimension", "Value"),
+        [
+            ("Evidence", str(report["evidence_status"])),
+            ("Isolation", str(report["isolation_status"])),
+            ("Contract", str(report["contract_status"])),
+            ("Overall report", str(report["report_status"])),
+        ],
+    )
+    input_fact = report["input"]
+    corpus = report["corpus"]
+    identity_rows = [
+        ("Report ID", str(report["report_id"])),
+        ("Artifact ID", str(input_fact["artifact_id"])),
+        ("Input SHA-256", str(input_fact["source_sha256"])),
+        ("Corpus ID", str(corpus["corpus_id"])),
+        ("Corpus identity level", str(corpus["identity_level"])),
+        ("Declared case count", str(corpus["case_count"])),
+        ("Manifest SHA-256", str(corpus["computed_manifest_sha256"])),
+    ]
+    contract = report.get("contract")
+    if contract is not None:
+        identity_rows.extend(
+            [
+                ("Contract ID", str(contract["contract_id"])),
+                ("Contract version", str(contract["contract_version"])),
+                ("Contract SHA-256", str(contract["source_sha256"])),
+            ]
+        )
+    identity_table = _html_table("Report identity", ("Identity", "Value"), identity_rows)
+    evaluation_table = _html_table(
+        "Evaluator identities",
+        (
+            "Role",
+            "Evaluation",
+            "Evaluator",
+            "Evaluator version",
+            "Evaluator fingerprint",
+            "Context",
+            "Context fingerprint",
+        ),
+        facts["evaluations"],
+    )
+    if facts["priority"]:
+        priority = _html_table(
+            "Decision-priority findings",
+            ("Policy", "Finding", "Summary", "Decision evidence"),
+            facts["priority"],
+        )
+    else:
+        priority = (
+            "<p>No hard contract, mandatory system-review, or critical-group "
+            "finding was emitted.</p>"
+        )
+    status_counts = _html_table(
+        "Trial status and label counts",
+        (
+            "Role",
+            "Trials",
+            "Determinate",
+            "Abstain",
+            "Indeterminate",
+            "Error",
+            "Determinate coverage",
+            "Determinate labels",
+        ),
+        facts["status"],
+    )
+    resources = _html_table(
+        "Resource disclosure",
+        ("Resource", "Observed"),
+        _resource_rows(report, report_sizes),
+    )
     contract_table = _html_table(
-        "Contract rule findings",
-        ("Rule", "Severity", "Metric", "Result"),
+        "Complete contract rule findings",
+        (
+            "Rule",
+            "Severity",
+            "Scope",
+            "Metric",
+            "Operator",
+            "Threshold",
+            "Actual",
+            "Result",
+            "Missing-evidence policy",
+            "Rationale",
+            "Bounded evidence",
+        ),
         facts["rules"],
     )
     critical_table = _html_table(
         "Critical-group evidence",
-        ("Group", "Cases", "Valid pairs", "Label transitions"),
+        (
+            "Group",
+            "Members",
+            "Valid pairs",
+            "Status transitions",
+            "Label transitions",
+            "Baseline errors",
+            "Candidate errors",
+        ),
         facts["critical"],
     )
+    critical_summary = _html_table(
+        "Critical-group aggregate",
+        (
+            "Groups",
+            "With status transitions",
+            "With label transitions",
+            "Baseline errors",
+            "Candidate errors",
+            "Finding groups",
+            "Detail displayed",
+            "Finding groups omitted",
+        ),
+        facts["critical_summary"],
+    )
     invariance_table = _html_table(
-        "Declared invariance outcomes",
-        ("Group", "Role", "Satisfied", "Violated", "Not evaluable"),
-        facts["invariance"],
+        "Aggregate invariance outcomes",
+        ("Role", "Satisfied", "Violated", "Not evaluable", "Total"),
+        facts["invariance_summary"],
     )
     anchor_table = _html_table(
         "Human-anchor evidence",
-        ("Anchor set", "Role", "Coverage", "Raw", "Agree", "Disagree"),
+        (
+            "Anchor set",
+            "Role",
+            "Raw annotations",
+            "Covered cases",
+            "Clusters",
+            "Comparable raw",
+            "Non-comparable raw",
+            "Role errors excluded",
+            "Role non-determinate excluded",
+            "Anchor non-determinate excluded",
+            "Non-unique role selections excluded",
+            "Incompatible label spaces excluded",
+            "Agreements",
+            "Disagreements",
+        ),
         facts["anchors"],
     )
-    repeat_table = _html_table(
-        "Repeat diagnostics",
-        ("Role", "Trials", "Coverage", "Status unstable", "Label unstable", "Score unstable"),
-        facts["repeat"],
+    provenance_summary = _html_table(
+        "Provenance delta summary",
+        ("Delta state", "Count"),
+        facts["provenance_summary"],
     )
-    provenance_table = _html_table(
-        "Provenance delta states", ("Fields", "Delta"), facts["provenance"]
+    provenance_detail = _html_table(
+        "Non-same provenance fields",
+        ("Field", "Delta", "Baseline presence", "Candidate presence"),
+        facts["provenance_detail"],
+    )
+    context_table = _html_table(
+        "Isolation findings", ("Component", "Finding"), facts["context"]
+    )
+    projection_table = _html_table(
+        "Bounded projection inventory",
+        ("Detail population", "Total", "Displayed", "Omitted"),
+        facts["projection"],
+    )
+    invariance_detail = _html_table(
+        "Bounded invariance detail",
+        (
+            "Role",
+            "Group",
+            "Result",
+            "Expected relation",
+            "Pairing key",
+            "Severity",
+            "Member cases",
+        ),
+        facts["invariance_detail"],
+    )
+    case_detail = _html_table(
+        "Bounded case summaries",
+        ("Case", "Critical groups", "Invariance groups", "Baseline", "Candidate"),
+        facts["cases"],
     )
     pairing = report["pairing"]
     pairing_summary = html.escape(
@@ -321,55 +1012,247 @@ pre {{ white-space:pre-wrap; overflow-wrap:anywhere }} a:focus-visible {{ outlin
 </head>
 <body><main>
 <header><h1>EvalCanary evaluator-assurance report</h1><p>Contract-bound evidence for a frozen evaluator migration. This report does not decide which evaluator is correct.</p></header>
-<section aria-labelledby="status-heading"><h2 id="status-heading">Status</h2>
-<table><caption>Evidence and contract status</caption><thead><tr><th scope="col">Dimension</th><th scope="col">Value</th></tr></thead><tbody>
-<tr><th scope="row">Evidence</th><td class="status">{html.escape(str(report["evidence_status"]))}</td></tr>
-<tr><th scope="row">Isolation</th><td class="status">{html.escape(str(report["isolation_status"]))}</td></tr>
-<tr><th scope="row">Contract</th><td class="status">{html.escape(str(report["contract_status"]))}</td></tr>
-<tr><th scope="row">Overall report</th><td class="status">{html.escape(str(report["report_status"]))}</td></tr>
-</tbody></table></section>
-<section aria-labelledby="warning-heading"><h2 id="warning-heading">Priority findings</h2><ul>{warnings}</ul></section>
-<section aria-labelledby="contract-heading"><h2 id="contract-heading">Contract findings</h2>{contract_table}</section>
-<section aria-labelledby="critical-heading"><h2 id="critical-heading">Critical groups</h2>{critical_table}</section>
-<section aria-labelledby="invariance-heading"><h2 id="invariance-heading">Invariance results</h2>{invariance_table}</section>
-<section aria-labelledby="anchor-heading"><h2 id="anchor-heading">Human-anchor diagnostics</h2>{anchor_table}</section>
-<section aria-labelledby="repeat-heading"><h2 id="repeat-heading">Repeat and pairing diagnostics</h2>{repeat_table}<p>{pairing_summary}</p></section>
-<section aria-labelledby="provenance-heading"><h2 id="provenance-heading">Provenance completeness</h2>{provenance_table}</section>
-<section aria-labelledby="reference-heading"><h2 id="reference-heading">Typed public references</h2><ul>{links}</ul></section>
-<section aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations</h2><ul>{limitations}</ul></section>
-<section aria-labelledby="facts-heading"><h2 id="facts-heading">Canonical facts</h2><p>Every material fact in the canonical JSON report is reproduced below.</p><pre>{canonical}</pre></section>
+<section aria-labelledby="a-heading"><h2 id="a-heading">A. Evidence, isolation, contract, and report status</h2>{status_table}</section>
+<section aria-labelledby="b-heading"><h2 id="b-heading">B. Decision summary</h2>{priority}{status_counts}{resources}<p>{pairing_summary}</p></section>
+<section aria-labelledby="c-heading"><h2 id="c-heading">C. Contract findings</h2>{contract_table}</section>
+<section aria-labelledby="d-heading"><h2 id="d-heading">D. Critical findings</h2>{critical_summary}{critical_table}</section>
+<section aria-labelledby="e-heading"><h2 id="e-heading">E. Invariance summary</h2>{invariance_table}<p>Bounded detail caps per role are: violated 50, not evaluable 25, satisfied 10.</p></section>
+<section aria-labelledby="f-heading"><h2 id="f-heading">F. Human-anchor summary</h2>{anchor_table}</section>
+<section aria-labelledby="g-heading"><h2 id="g-heading">G. Provenance and context changes</h2>{identity_table}{evaluation_table}{provenance_summary}{provenance_detail}{context_table}<h3>Typed public references</h3><ul>{links}</ul></section>
+<section aria-labelledby="h-heading"><h2 id="h-heading">H. Bounded detail</h2><p>The companion <code>report.json</code> is the exhaustive canonical record. Human projections deliberately omit repetitive rows.</p><p>Canonical JSON SHA-256: <code>{html.escape(canonical_json_sha256)}</code>. Bounded detail rows displayed: <code>{facts['displayed_detail_rows']}</code>; omitted: <code>{facts['omitted_detail_rows']}</code>.</p>{projection_table}{invariance_detail}{case_detail}</section>
+<section aria-labelledby="i-heading"><h2 id="i-heading">I. Limitations</h2><ul>{limitations}</ul></section>
 </main></body></html>
 """
 
 
-def _reject_symlink_path(path: Path) -> None:
-    current = path.absolute()
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_Topology = tuple[tuple[str, int, int, int], ...]
+
+
+def _absolute(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _components(path: Path) -> list[Path]:
+    current = _absolute(path)
+    parts = []
     while True:
-        if current.exists() and current.is_symlink():
-            raise InputValidationError(
-                "Report destination must not traverse a symbolic link."
-            )
+        parts.append(current)
         if current.parent == current:
-            break
+            return list(reversed(parts))
         current = current.parent
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+def _lstat(path: Path) -> os.stat_result | None:
     try:
-        with temporary.open("xb") as handle:
-            handle.write(data)
+        return os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InputValidationError(
+            "Report output path could not be inspected safely."
+        ) from exc
+
+
+def _is_reparse_point(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
+    )
+
+
+def _validate_path_chain(path: Path, *, leaf_kind: str) -> Path:
+    absolute = _absolute(path)
+    components = _components(absolute)
+    missing_seen = False
+    for index, component in enumerate(components):
+        info = _lstat(component)
+        is_leaf = index == len(components) - 1
+        if info is None:
+            missing_seen = True
+            continue
+        if missing_seen:
+            raise InputValidationError(
+                "Report output topology changed during validation."
+            )
+        if _is_reparse_point(info):
+            raise InputValidationError(
+                "Report destination must not traverse a reparse point or symbolic link."
+            )
+        if not is_leaf or leaf_kind == "directory_or_missing":
+            if not stat.S_ISDIR(info.st_mode):
+                if is_leaf:
+                    raise InputValidationError(
+                        "Report output destination exists and is not a directory."
+                    )
+                raise InputValidationError(
+                    "Report output path has a non-directory ancestor."
+                )
+        elif leaf_kind == "file_or_missing" and not stat.S_ISREG(info.st_mode):
+            raise InputValidationError(
+                "Report output target exists and is not a regular file."
+            )
+    return absolute
+
+
+def _directory_topology(path: Path) -> _Topology:
+    absolute = _validate_path_chain(path, leaf_kind="directory_or_missing")
+    topology: list[tuple[str, int, int, int]] = []
+    for component in _components(absolute):
+        info = _lstat(component)
+        if info is None:
+            raise InputValidationError(
+                "Report output topology changed during validation."
+            )
+        if _is_reparse_point(info) or not stat.S_ISDIR(info.st_mode):
+            raise InputValidationError(
+                "Report destination topology is no longer safe."
+            )
+        topology.append(
+            (
+                os.path.normcase(os.fspath(component)),
+                int(info.st_dev),
+                int(info.st_ino),
+                int(stat.S_IFMT(info.st_mode)),
+            )
+        )
+    return tuple(topology)
+
+
+def _capture_directory_topology(path: Path) -> _Topology:
+    first = _directory_topology(path)
+    second = _directory_topology(path)
+    if first != second:
+        raise InputValidationError("Report output topology changed during validation.")
+    return first
+
+
+def _assert_directory_topology(path: Path, expected: _Topology) -> None:
+    if _capture_directory_topology(path) != expected:
+        raise InputValidationError("Report output topology changed during validation.")
+
+
+def _paths_alias(left: Path, right: Path) -> bool:
+    left_absolute = _absolute(left)
+    right_absolute = _absolute(right)
+    if os.path.normcase(os.fspath(left_absolute)) == os.path.normcase(
+        os.fspath(right_absolute)
+    ):
+        return True
+    if os.path.normcase(os.path.realpath(left_absolute)) == os.path.normcase(
+        os.path.realpath(right_absolute)
+    ):
+        return True
+    try:
+        return os.path.samefile(left_absolute, right_absolute)
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _reject_source_aliases(
+    output_directory: Path,
+    targets: tuple[Path, ...],
+    source_paths: tuple[Path, ...],
+) -> None:
+    for destination in (output_directory, *targets):
+        for source in source_paths:
+            if _paths_alias(destination, source):
+                raise InputValidationError(
+                    "A report destination must not overwrite or alias a source input."
+                )
+
+
+def _write_temporary(
+    target: Path,
+    chunks: Iterable[bytes],
+    *,
+    output_directory: Path,
+    topology: _Topology,
+    expected_size: int,
+    expected_sha256: str | None = None,
+) -> Path:
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    descriptor: int | None = None
+    completed = False
+    try:
+        _assert_directory_topology(output_directory, topology)
+        _validate_path_chain(temporary, leaf_kind="file_or_missing")
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        digest = hashlib.sha256()
+        size = 0
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
+            for chunk in chunks:
+                handle.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
             handle.flush()
             os.fsync(handle.fileno())
-        with suppress(OSError):
-            temporary.chmod(0o600)
-        os.replace(temporary, path)
+        if size != expected_size or (
+            expected_sha256 is not None and digest.hexdigest() != expected_sha256
+        ):
+            raise InputValidationError(
+                "Report output changed between preflight and temporary write."
+            )
+        _validate_path_chain(temporary, leaf_kind="file_or_missing")
+        _assert_directory_topology(output_directory, topology)
+        completed = True
+        return temporary
     except OSError as exc:
         raise InputValidationError("Report output could not be written safely.") from exc
     finally:
-        with suppress(OSError):
-            if temporary.exists():
-                temporary.unlink()
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        if not completed:
+            with suppress(OSError):
+                os.unlink(temporary)
+
+
+def _json_chunks(report: dict[str, Any]) -> Iterable[bytes]:
+    for chunk in iter_canonical_json(report):
+        yield chunk.encode("utf-8")
+    yield b"\n"
+
+
+def _stabilized_human_reports(
+    report: dict[str, Any], *, json_size: int, json_sha256: str, limits: Limits
+) -> tuple[bytes, bytes, dict[str, int]]:
+    sizes = {
+        "json_report_bytes": json_size,
+        "markdown_report_bytes": 0,
+        "html_report_bytes": 0,
+    }
+    for _ in range(16):
+        markdown_data = markdown_text(
+            report,
+            canonical_json_sha256=json_sha256,
+            report_sizes=sizes,
+        ).encode("utf-8")
+        limits.enforce(
+            "markdown_report_bytes", len(markdown_data), field_path="$report"
+        )
+        html_data = html_text(
+            report,
+            canonical_json_sha256=json_sha256,
+            report_sizes=sizes,
+        ).encode("utf-8")
+        limits.enforce("html_report_bytes", len(html_data), field_path="$report")
+        actual = {
+            "json_report_bytes": json_size,
+            "markdown_report_bytes": len(markdown_data),
+            "html_report_bytes": len(html_data),
+        }
+        limits.enforce(
+            "combined_report_bytes", sum(actual.values()), field_path="$report_bundle"
+        )
+        if actual == sizes:
+            return markdown_data, html_data, actual
+        sizes = actual
+    raise InputValidationError("Human report size disclosure did not stabilize.")
 
 
 def write_report_bundle(
@@ -381,43 +1264,124 @@ def write_report_bundle(
 ) -> tuple[Path, Path, Path]:
     """Preflight all formats, then write temporary siblings and atomically replace."""
 
-    _reject_symlink_path(output_directory)
-    if output_directory.exists() and not output_directory.is_dir():
-        raise InputValidationError(
-            "Report output destination exists and is not a directory."
-        )
-    json_data = json_bytes(report)
-    markdown_data = markdown_text(report).encode("utf-8")
-    html_data = html_text(report).encode("utf-8")
-    sizes = {
-        "json_report_bytes": len(json_data),
-        "markdown_report_bytes": len(markdown_data),
-        "html_report_bytes": len(html_data),
-    }
-    for name, size in sizes.items():
-        limits.enforce(name, size, field_path="$report")
-    limits.enforce(
-        "combined_report_bytes", sum(sizes.values()), field_path="$report_bundle"
-    )
+    output_directory = _absolute(output_directory)
     targets = (
         output_directory / "report.json",
         output_directory / "report.md",
         output_directory / "report.html",
     )
+    _reject_source_aliases(output_directory, targets, source_paths)
+    _validate_path_chain(output_directory, leaf_kind="directory_or_missing")
     for target in targets:
-        _reject_symlink_path(target)
-    source_resolved = {item.resolve() for item in source_paths}
-    if any(target.resolve() in source_resolved for target in targets):
-        raise InputValidationError(
-            "A report destination must not overwrite a source input."
-        )
+        _validate_path_chain(target, leaf_kind="file_or_missing")
+    json_size, json_sha256 = _canonical_size_hash(report)
+    limits.enforce("json_report_bytes", json_size, field_path="$report")
+    markdown_data, html_data, sizes = _stabilized_human_reports(
+        report, json_size=json_size, json_sha256=json_sha256, limits=limits
+    )
+    for name, size in sizes.items():
+        limits.enforce(name, size, field_path="$report")
+    limits.enforce(
+        "combined_report_bytes", sum(sizes.values()), field_path="$report_bundle"
+    )
     try:
         output_directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise InputValidationError("Report output directory could not be created.") from exc
-    _reject_symlink_path(output_directory)
-    for target, data in zip(
-        targets, (json_data, markdown_data, html_data), strict=True
-    ):
-        _atomic_write(target, data)
+    _validate_path_chain(output_directory, leaf_kind="directory_or_missing")
+    topology = _capture_directory_topology(output_directory)
+    _reject_source_aliases(output_directory, targets, source_paths)
+    prepared: list[Path] = []
+    backups: list[tuple[Path, Path]] = []
+    published: list[Path] = []
+    preserve_backups = False
+    try:
+        prepared.append(
+            _write_temporary(
+                targets[0],
+                _json_chunks(report),
+                output_directory=output_directory,
+                topology=topology,
+                expected_size=sizes["json_report_bytes"],
+                expected_sha256=json_sha256,
+            )
+        )
+        for target, data, size_name in (
+            (targets[1], markdown_data, "markdown_report_bytes"),
+            (targets[2], html_data, "html_report_bytes"),
+        ):
+            prepared.append(
+                _write_temporary(
+                    target,
+                    (data,),
+                    output_directory=output_directory,
+                    topology=topology,
+                    expected_size=sizes[size_name],
+                )
+            )
+        for target in targets:
+            _assert_directory_topology(output_directory, topology)
+            _validate_path_chain(target, leaf_kind="file_or_missing")
+            if _lstat(target) is None:
+                continue
+            backup = target.with_name(f".{target.name}.{uuid.uuid4().hex}.backup")
+            _validate_path_chain(backup, leaf_kind="file_or_missing")
+            if _lstat(backup) is not None:
+                raise InputValidationError(
+                    "Report backup destination changed during validation."
+                )
+            _reject_source_aliases(output_directory, targets, source_paths)
+            try:
+                os.replace(target, backup)
+            except OSError as exc:
+                raise InputValidationError(
+                    "Existing report bundle could not be staged safely."
+                ) from exc
+            backups.append((target, backup))
+            _assert_directory_topology(output_directory, topology)
+            _validate_path_chain(backup, leaf_kind="file_or_missing")
+        for target, temporary in zip(targets, prepared, strict=True):
+            _assert_directory_topology(output_directory, topology)
+            _validate_path_chain(target, leaf_kind="file_or_missing")
+            _validate_path_chain(temporary, leaf_kind="file_or_missing")
+            _reject_source_aliases(output_directory, targets, source_paths)
+            try:
+                os.replace(temporary, target)
+            except OSError as exc:
+                raise InputValidationError(
+                    "Report output could not be replaced safely."
+                ) from exc
+            published.append(target)
+            _assert_directory_topology(output_directory, topology)
+            _validate_path_chain(target, leaf_kind="file_or_missing")
+    except InputValidationError as exc:
+        rollback_error: OSError | InputValidationError | None = None
+        for target in reversed(published):
+            try:
+                _validate_path_chain(target, leaf_kind="file_or_missing")
+                os.unlink(target)
+            except (OSError, InputValidationError) as rollback_exc:
+                rollback_error = rollback_error or rollback_exc
+        for target, backup in reversed(backups):
+            try:
+                _assert_directory_topology(output_directory, topology)
+                _validate_path_chain(backup, leaf_kind="file_or_missing")
+                os.replace(backup, target)
+                _validate_path_chain(target, leaf_kind="file_or_missing")
+            except (OSError, InputValidationError) as rollback_exc:
+                rollback_error = rollback_error or rollback_exc
+        if rollback_error is not None:
+            preserve_backups = True
+            raise InputValidationError(
+                "Report publication failed and the prior bundle could not be rolled back safely."
+            ) from exc
+        raise
+    finally:
+        for temporary in prepared:
+            with suppress(OSError):
+                os.unlink(temporary)
+        if not preserve_backups:
+            for _, backup in backups:
+                with suppress(OSError):
+                    os.unlink(backup)
     return targets

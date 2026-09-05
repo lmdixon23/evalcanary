@@ -9,6 +9,7 @@ from tests.assurance_helpers import (
     clone_records,
     component,
     contract,
+    pure_numeric_records,
     rule,
     write_json,
     write_records,
@@ -17,6 +18,7 @@ from tests.assurance_helpers import (
 from evalcanary.assurance.constants import METRICS, PROVENANCE_FIELDS
 from evalcanary.assurance.engine import build_report, exit_code_for_report
 from evalcanary.assurance.schema import load_artifact, load_contract
+from evalcanary.errors import InputValidationError, PolicyConfigurationError
 
 
 class AssuranceEngineTests(unittest.TestCase):
@@ -351,6 +353,123 @@ class AssuranceContractTests(unittest.TestCase):
         self.assertEqual(report["rule_results"][0]["result"], "not_applicable")
         self.assertEqual(report["report_status"], "HARD_FAILURE")
 
+    def test_numeric_label_metrics_reach_not_applicable_for_every_policy(self) -> None:
+        metrics = (
+            (
+                "determinate_label_count",
+                "all_cases",
+                None,
+                {"role": "candidate", "label": "placeholder"},
+            ),
+            (
+                "determinate_label_transition_count",
+                "all_cases",
+                None,
+                {"from_label": "before", "to_label": "after"},
+            ),
+            (
+                "critical_regression_count",
+                "critical_group",
+                "critical-1",
+                {"from_label": "before", "to_label": "after"},
+            ),
+        )
+        policies = (
+            ("hard", "hard_fail", "HARD_FAILURE", 2),
+            ("review", "review", "REVIEW_REQUIRED", 4),
+            ("info", "info", "PASS", 0),
+        )
+        for metric, scope, scope_id, parameters in metrics:
+            for severity, missing_evidence, contract_status, exit_code in policies:
+                with self.subTest(metric=metric, policy=missing_evidence):
+                    report = self._report(
+                        pure_numeric_records(),
+                        contract(
+                            rule(
+                                metric,
+                                scope=scope,
+                                scope_id=scope_id,
+                                parameters=parameters,
+                                severity=severity,
+                                missing_evidence=missing_evidence,
+                            )
+                        ),
+                    )
+                    self.assertEqual(
+                        report["rule_results"][0]["result"], "not_applicable"
+                    )
+                    self.assertEqual(report["contract_status"], contract_status)
+                    self.assertEqual(exit_code_for_report(report), exit_code)
+
+    def test_label_metric_parameters_stay_bounded_and_categorical_fail_closed(
+        self,
+    ) -> None:
+        controls = (
+            (
+                "determinate_label_count",
+                "all_cases",
+                None,
+                {"role": "candidate", "label": "illegal"},
+            ),
+            (
+                "determinate_label_transition_count",
+                "all_cases",
+                None,
+                {"from_label": "pass", "to_label": "illegal"},
+            ),
+            (
+                "critical_regression_count",
+                "critical_group",
+                "critical-1",
+                {"from_label": "pass", "to_label": "illegal"},
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = load_artifact(
+                write_records(root / "categorical.jsonl", clone_records())
+            )
+            for metric, scope, scope_id, parameters in controls:
+                with self.subTest(metric=metric), self.assertRaises(
+                    PolicyConfigurationError
+                ):
+                    load_contract(
+                        write_json(
+                            root / f"{metric}.json",
+                            contract(
+                                rule(
+                                    metric,
+                                    scope=scope,
+                                    scope_id=scope_id,
+                                    parameters=parameters,
+                                )
+                            ),
+                        ),
+                        artifact,
+                    )
+
+            numeric = load_artifact(
+                write_records(root / "numeric.jsonl", pure_numeric_records())
+            )
+            for bad_label in ("", "x" * 65, "bad\nlabel"):
+                with self.subTest(label=repr(bad_label)), self.assertRaises(
+                    InputValidationError
+                ):
+                    load_contract(
+                        write_json(
+                            root / "bad-numeric-label.json",
+                            contract(
+                                rule(
+                                    "determinate_label_count",
+                                    parameters={
+                                        "role": "candidate",
+                                        "label": bad_label,
+                                    },
+                                )
+                            ),
+                        ),
+                        numeric,
+                    )
     def test_incomplete_optional_evidence_never_silently_satisfies_zero(self) -> None:
         invariance_items = clone_records()
         candidate = next(
