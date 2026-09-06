@@ -61,15 +61,25 @@ class AssuranceRendererTests(unittest.TestCase):
     ) -> tuple[
         Path,
         Path,
-        tuple[Path, Path, Path],
+        tuple[Path, ...],
         dict[str, bytes],
         dict[str, object],
     ]:
         report = self._report(root)
         source = root / "input.jsonl"
         output = root / "output"
-        targets = write_report_bundle(
+        write_report_bundle(
             report, output, limits=Limits(), source_paths=(source,)
+        )
+        targets = tuple(
+            output / name
+            for name in (
+                "report.json",
+                "report.md",
+                "report.html",
+                "review-queue.json",
+                "review-queue.md",
+            )
         )
         previous = {target.name: target.read_bytes() for target in targets}
         changed = deepcopy(report)
@@ -395,7 +405,7 @@ class AssuranceRendererTests(unittest.TestCase):
             def changing(path: Path, expected: object) -> None:
                 nonlocal calls
                 calls += 1
-                if calls == 5:
+                if calls == 7:
                     raise InputValidationError(
                         "Report output topology changed during validation."
                     )
@@ -413,7 +423,17 @@ class AssuranceRendererTests(unittest.TestCase):
             root = Path(temp)
             report = self._report(root)
             output = root / "output"
-            targets = write_report_bundle(report, output, limits=Limits())
+            write_report_bundle(report, output, limits=Limits())
+            targets = tuple(
+                output / name
+                for name in (
+                    "report.json",
+                    "report.md",
+                    "report.html",
+                    "review-queue.json",
+                    "review-queue.md",
+                )
+            )
             previous = {target.name: target.read_bytes() for target in targets}
             changed = deepcopy(report)
             changed["warnings"] = ["new generation marker"]
@@ -423,7 +443,7 @@ class AssuranceRendererTests(unittest.TestCase):
             def fail_second_publication(source: object, target: object) -> None:
                 nonlocal calls
                 calls += 1
-                if calls == 5:
+                if calls == 7:
                     raise OSError("second publication blocked")
                 real_replace(source, target)
 
@@ -440,7 +460,7 @@ class AssuranceRendererTests(unittest.TestCase):
     def test_each_preparation_failure_preserves_prior_bundle(self) -> None:
         from evalcanary.assurance import renderers as renderer_module
 
-        for failure_at in (1, 2, 3):
+        for failure_at in (1, 2, 3, 4, 5):
             with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as temp:
                 source, output, targets, previous, changed = self._existing_bundle(
                     Path(temp)
@@ -479,7 +499,7 @@ class AssuranceRendererTests(unittest.TestCase):
                 self.assertEqual(list(output.glob(".*.backup")), [])
 
     def test_each_publication_failure_restores_prior_bundle(self) -> None:
-        for failure_at in (4, 5, 6):
+        for failure_at in (6, 7, 8, 9, 10):
             with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as temp:
                 source, output, targets, previous, changed = self._existing_bundle(
                     Path(temp)
@@ -516,7 +536,13 @@ class AssuranceRendererTests(unittest.TestCase):
     ) -> None:
         from evalcanary.assurance import renderers as renderer_module
 
-        for failed_name in ("report.json", "report.md", "report.html"):
+        for failed_name in (
+            "report.json",
+            "report.md",
+            "report.html",
+            "review-queue.json",
+            "review-queue.md",
+        ):
             with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
                 source, output, targets, previous, changed = self._existing_bundle(
                     Path(temp)
@@ -535,7 +561,13 @@ class AssuranceRendererTests(unittest.TestCase):
                     target = Path(target_path)  # type: ignore[arg-type]
                     source_name = Path(source_path).name  # type: ignore[arg-type]
                     _real_replace(source_path, target_path)  # type: ignore[operator]
-                    if target.name.startswith("report.") and source_name.endswith(".tmp"):
+                    if source_name.endswith(".tmp") and target.name in {
+                        "report.json",
+                        "report.md",
+                        "report.html",
+                        "review-queue.json",
+                        "review-queue.md",
+                    }:
                         _published.add(target.name)
 
                 def fail_validation(
@@ -583,7 +615,13 @@ class AssuranceRendererTests(unittest.TestCase):
                 self.assertEqual(list(output.glob(".*.backup")), [])
 
     def test_each_primary_restore_failure_uses_verified_fallback(self) -> None:
-        for failed_name in ("report.json", "report.md", "report.html"):
+        for failed_name in (
+            "report.json",
+            "report.md",
+            "report.html",
+            "review-queue.json",
+            "review-queue.md",
+        ):
             with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
                 source, output, targets, previous, changed = self._existing_bundle(
                     Path(temp)
@@ -631,7 +669,13 @@ class AssuranceRendererTests(unittest.TestCase):
                 self.assertEqual(list(output.glob(".*.backup")), [])
 
     def test_secondary_restore_failure_is_explicit_and_retains_backups(self) -> None:
-        for failed_name in ("report.json", "report.md", "report.html"):
+        for failed_name in (
+            "report.json",
+            "report.md",
+            "report.html",
+            "review-queue.json",
+            "review-queue.md",
+        ):
             with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 source, output, _, previous, changed = self._existing_bundle(root)
@@ -674,7 +718,7 @@ class AssuranceRendererTests(unittest.TestCase):
                     hashlib.sha256(source.read_bytes()).hexdigest(), source_hash
                 )
                 backups = list(output.glob(".*.backup"))
-                self.assertEqual(len(backups), 3)
+                self.assertEqual(len(backups), 5)
                 for name, expected_bytes in previous.items():
                     matching = [
                         path

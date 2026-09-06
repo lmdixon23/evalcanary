@@ -871,6 +871,7 @@ def _contract_facts(
                 "scope": rule["scope"],
                 "scope_id": rule["scope_id"],
                 "metric": rule["metric"],
+                "parameters": rule["parameters"],
                 "result": state,
                 "value": value_fact,
                 "operator": rule["operator"],

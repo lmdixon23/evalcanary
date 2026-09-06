@@ -28,6 +28,8 @@ class CliTests(unittest.TestCase):
             self.assertTrue((out / "report.json").is_file())
             self.assertTrue((out / "report.md").is_file())
             self.assertTrue((out / "report.html").is_file())
+            self.assertFalse((out / "review-queue.json").exists())
+            self.assertFalse((out / "review-queue.md").exists())
             payload = json.loads((out / "report.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["transition_counts"]["fail_to_pass"], 1)
 
