@@ -122,6 +122,13 @@ def verify_workflow_action_pins() -> int:
     return references
 
 
+def verify_assurance_schema_drift() -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    from evalcanary.assurance.structural import verify_checked_in_schemas
+
+    verify_checked_in_schemas()
+
+
 def main() -> int:
     pass_items: list[str] = []
     fail_items: list[str] = []
@@ -143,6 +150,9 @@ def main() -> int:
             "Workflow action SHA-pin and trigger gate passed: "
             f"{pinned_references} references"
         )
+
+        verify_assurance_schema_drift()
+        pass_items.append("Assurance structural schema byte-drift gate passed")
 
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT / "src")

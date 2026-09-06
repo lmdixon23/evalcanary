@@ -11,8 +11,11 @@ from pathlib import Path
 from . import __version__
 from .assurance.engine import build_report as build_assurance_report
 from .assurance.engine import exit_code_for_report
+from .assurance.numeric import canonical_json_text
+from .assurance.preflight import preflight_paths
 from .assurance.renderers import write_report_bundle
 from .assurance.schema import Limits, load_artifact, load_contract
+from .assurance.structural import canonical_schema_bytes
 from .compare import compare_verdicts
 from .errors import EvalCanaryError, InputValidationError
 from .io import load_cases
@@ -150,6 +153,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default=Path("evalcanary-assurance-report"),
         help="Output directory for canonical JSON, Markdown, and HTML.",
     )
+    migrate.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate inputs only; write no report packet and return only 0 or 3.",
+    )
+
+    schema = sub.add_parser(
+        "schema",
+        help="Write one bundled evaluator-assurance JSON Schema to stdout.",
+    )
+    schema.add_argument(
+        "selector",
+        help="input-record, contract, report, or review-queue",
+    )
 
     return parser
 
@@ -267,6 +284,14 @@ def _run_demo(args: argparse.Namespace) -> int:
 
 
 def _run_migrate(args: argparse.Namespace) -> int:
+    if args.preflight:
+        result = preflight_paths(
+            args.input,
+            contract_path=args.contract,
+            limits_path=args.limits,
+        )
+        print(canonical_json_text(result.document()))
+        return EXIT_OK if result.valid else EXIT_ERROR
     limits = Limits.from_path(args.limits)
     artifact = load_artifact(args.input, limits=limits)
     contract = load_contract(args.contract, artifact)
@@ -291,6 +316,11 @@ def _run_migrate(args: argparse.Namespace) -> int:
     return exit_code_for_report(report)
 
 
+def _run_schema(args: argparse.Namespace) -> int:
+    sys.stdout.write(canonical_schema_bytes(args.selector).decode("utf-8"))
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_args = list(sys.argv[1:] if argv is None else argv)
@@ -304,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_demo(args)
         if args.command == "migrate":
             return _run_migrate(args)
+        if args.command == "schema":
+            return _run_schema(args)
         parser.error("Unknown command.")
     except EvalCanaryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
