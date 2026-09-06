@@ -7,6 +7,7 @@ include tests/test_assurance_render_cli.py
 include tests/test_assurance_schema.py
 include tests/test_assurance_review_queue.py
 include tests/test_assurance_schema_preflight.py
+include tests/test_assurance_producer_scaffold.py
 include tests/test_cli.py
 include tests/test_compare_policy.py
 include tests/test_io.py
@@ -17,6 +18,8 @@ include tests/test_statistics.py
 include tests/fixtures/assurance/case_locks.json
 include scripts/prepare_assurance_cases.py
 include scripts/generate_assurance_schemas.py
+include scripts/generate_assurance_examples.py
 include scripts/run_action.py
 include scripts/validate_mt_bench_case.py
 recursive-include src/evalcanary/assurance/schemas *.schema.json
+recursive-include src/evalcanary/examples/assurance *.jsonl *.md

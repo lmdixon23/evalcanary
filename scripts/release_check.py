@@ -154,6 +154,12 @@ def main() -> int:
         verify_assurance_schema_drift()
         pass_items.append("Assurance structural schema byte-drift gate passed")
 
+        run(
+            [sys.executable, "scripts/generate_assurance_examples.py", "--check"],
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        )
+        pass_items.append("Offline assurance producer examples passed byte-drift gate")
+
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT / "src")
         env["SOURCE_DATE_EPOCH"] = "1785960000"

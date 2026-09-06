@@ -179,7 +179,10 @@ evalcanary migrate \
 
 The optional contract uses a closed metric vocabulary and hard, review, or
 informational severities. Output is one canonical JSON model plus fact-parity
-Markdown and accessible, scriptless HTML. Reports are metadata-only by default.
+Markdown and accessible, scriptless HTML, together with exhaustive JSON and
+bounded Markdown review queues. Reports and queues are metadata-only by default.
+Use `migrate --preflight` for validation-only authoring diagnostics, `schema`
+for the four offline structural contracts, and `init` for an inert scaffold.
 See the [evaluator-assurance reference](docs/EVALUATOR_ASSURANCE.md) for the
 schema boundary, privacy rules, resource limits, and exit statuses.
 

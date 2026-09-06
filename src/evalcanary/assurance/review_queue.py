@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Any
 
 from ..errors import InputValidationError
-from .numeric import canonical_json_bytes
+from .numeric import canonical_json_bytes, iter_canonical_json
 
 REVIEW_QUEUE_SCHEMA = "evaluator-assurance-review-queue-v1"
 REASON_RANKS: dict[str, int] = {
@@ -51,7 +51,11 @@ _ROLE_ORDER = {None: -1, "baseline": 0, "candidate": 1}
 def report_file_sha256(report: dict[str, Any]) -> str:
     """Hash the exact canonical report.json bytes, including its final LF."""
 
-    return hashlib.sha256(canonical_json_bytes(report) + b"\n").hexdigest()
+    digest = hashlib.sha256()
+    for chunk in iter_canonical_json(report):
+        digest.update(chunk.encode("utf-8"))
+    digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _pointer(*tokens: str | int) -> str:

@@ -1426,10 +1426,10 @@ def write_report_bundle(
     )
     queue = build_review_queue(report)
     verify_review_queue_binding(report, queue)
-    queue_json_data = canonical_json_bytes(queue) + b"\n"
+    queue_json_size, queue_json_sha256 = _canonical_size_hash(queue)
     queue_markdown_data = review_queue_markdown(queue).encode("utf-8")
     limits.enforce(
-        "json_report_bytes", len(queue_json_data), field_path="$review_queue"
+        "json_report_bytes", queue_json_size, field_path="$review_queue"
     )
     limits.enforce(
         "markdown_report_bytes",
@@ -1440,7 +1440,7 @@ def write_report_bundle(
         limits.enforce(name, size, field_path="$report")
     limits.enforce(
         "combined_report_bytes",
-        sum(sizes.values()) + len(queue_json_data) + len(queue_markdown_data),
+        sum(sizes.values()) + queue_json_size + len(queue_markdown_data),
         field_path="$report_bundle",
     )
     try:
@@ -1468,8 +1468,6 @@ def write_report_bundle(
         for target, data, size_name in (
             (targets[1], markdown_data, "markdown_report_bytes"),
             (targets[2], html_data, "html_report_bytes"),
-            (targets[3], queue_json_data, "json_report_bytes"),
-            (targets[4], queue_markdown_data, "markdown_report_bytes"),
         ):
             prepared.append(
                 _write_temporary(
@@ -1482,6 +1480,26 @@ def write_report_bundle(
                     ),
                 )
             )
+        prepared.append(
+            _write_temporary(
+                targets[3],
+                _json_chunks(queue),
+                output_directory=output_directory,
+                topology=topology,
+                expected_size=queue_json_size,
+                expected_sha256=queue_json_sha256,
+            )
+        )
+        del queue
+        prepared.append(
+            _write_temporary(
+                targets[4],
+                (queue_markdown_data,),
+                output_directory=output_directory,
+                topology=topology,
+                expected_size=len(queue_markdown_data),
+            )
+        )
         for target in targets:
             _assert_directory_topology(output_directory, topology)
             _validate_path_chain(target, leaf_kind="file_or_missing")
