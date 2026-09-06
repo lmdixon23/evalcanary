@@ -40,6 +40,7 @@ from .numeric import (
     parse_decimal_token,
     reject_constant,
 )
+from .structural import FIELD_REGISTRY, METRIC_SIGNATURES
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -331,7 +332,7 @@ def _extensions(value: Any, field_path: str, limits: Limits) -> dict[str, Any]:
 
 
 def _component_value(value: Any, field_path: str, limits: Limits) -> dict[str, Any]:
-    obj = _exact_fields(value, {"presence", "identity", "sha256"}, field_path)
+    obj = _exact_fields(value, set(FIELD_REGISTRY["component_value"]), field_path)
     presence = _enum(obj["presence"], PRESENCES, f"{field_path}.presence")
     identity = obj["identity"]
     if identity is not None:
@@ -436,7 +437,7 @@ def _read_jsonl(
 def _validate_component_inventory(header: dict[str, Any], limits: Limits) -> None:
     ownership = _exact_fields(
         header["component_ownership"],
-        set(MOVABLE_COMPONENTS),
+        set(FIELD_REGISTRY["component_ownership"]),
         "header.component_ownership",
     )
     for name in MOVABLE_COMPONENTS:
@@ -479,13 +480,7 @@ def _validate_component_inventory(header: dict[str, Any], limits: Limits) -> Non
 def _validate_judgment_spec(value: Any, limits: Limits) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "judgment_spec_id",
-            "kind",
-            "label_space",
-            "score_spec",
-            "repeat_score_tolerance",
-        },
+        set(FIELD_REGISTRY["judgment_spec"]),
         "header.judgment_spec",
     )
     _id(obj["judgment_spec_id"], "judgment_spec.judgment_spec_id")
@@ -511,15 +506,7 @@ def _validate_judgment_spec(value: Any, limits: Limits) -> dict[str, Any]:
     if kind in {"numeric", "categorical_and_numeric"}:
         score = _exact_fields(
             score_spec,
-            {
-                "scale_id",
-                "domain_min",
-                "domain_max",
-                "direction",
-                "comparison",
-                "valid_statuses",
-                "threshold_relationship",
-            },
+            set(FIELD_REGISTRY["score_spec"]),
             "judgment_spec.score_spec",
         )
         _id(score["scale_id"], "score_spec.scale_id")
@@ -547,7 +534,7 @@ def _validate_judgment_spec(value: Any, limits: Limits) -> dict[str, Any]:
         if relationship is not None:
             relation = _exact_fields(
                 relationship,
-                {"operator", "threshold", "below_label", "above_label"},
+                set(FIELD_REGISTRY["threshold_relationship"]),
                 "score_spec.threshold_relationship",
             )
             _enum(
@@ -585,18 +572,7 @@ def _validate_judgment_spec(value: Any, limits: Limits) -> dict[str, Any]:
 
 
 def _validate_header(value: Any, limits: Limits) -> dict[str, Any]:
-    fields = {
-        "record_type",
-        "schema_version",
-        "artifact_id",
-        "corpus",
-        "judgment_spec",
-        "evaluations",
-        "component_ownership",
-        "allowed_context_differences",
-        "provenance",
-        "extensions",
-    }
+    fields = set(FIELD_REGISTRY["header"])
     header = _exact_fields(value, fields, "header")
     if header["record_type"] != "header" or header["schema_version"] != INPUT_SCHEMA:
         raise InputValidationError(
@@ -605,13 +581,7 @@ def _validate_header(value: Any, limits: Limits) -> dict[str, Any]:
     _id(header["artifact_id"], "header.artifact_id")
     corpus = _exact_fields(
         header["corpus"],
-        {
-            "corpus_id",
-            "manifest_sha256",
-            "case_count",
-            "identity_level",
-            "manifest_algorithm",
-        },
+        set(FIELD_REGISTRY["corpus"]),
         "header.corpus",
     )
     _id(corpus["corpus_id"], "corpus.corpus_id")
@@ -630,18 +600,7 @@ def _validate_header(value: Any, limits: Limits) -> dict[str, Any]:
     evaluations = _array(header["evaluations"], "header.evaluations")
     if len(evaluations) != 2:
         raise InputValidationError("Exactly two evaluations are required.")
-    evaluation_fields = {
-        "evaluation_id",
-        "role",
-        "evaluator_id",
-        "evaluator_version",
-        "evaluator_fingerprint_sha256",
-        "evaluator_components",
-        "context_id",
-        "context_fingerprint_sha256",
-        "context_components",
-        "provenance",
-    }
+    evaluation_fields = set(FIELD_REGISTRY["evaluation"])
     roles: list[str] = []
     evaluation_ids: list[str] = []
     for index, raw in enumerate(evaluations):
@@ -681,14 +640,7 @@ def _validate_header(value: Any, limits: Limits) -> dict[str, Any]:
     context_inventory = set(FIXED_CONTEXT_COMPONENTS) | {
         name for name, owner in ownership.items() if owner == "context"
     }
-    exception_fields = {
-        "component",
-        "expected_baseline_component_value",
-        "expected_candidate_component_value",
-        "rationale",
-        "reviewer_id",
-        "disposition",
-    }
+    exception_fields = set(FIELD_REGISTRY["context_difference"])
     for index, raw in enumerate(exceptions):
         item = _exact_fields(
             raw, exception_fields, f"allowed_context_differences[{index}]"
@@ -739,17 +691,7 @@ def _validate_case(
 ) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "case_id",
-            "manifest_position",
-            "content_sha256",
-            "critical_group_ids",
-            "invariance_group_ids",
-            "tags",
-            "display_label",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["case"]),
         f"case[{index}]",
     )
     _id(obj["case_id"], f"case[{index}].case_id")
@@ -794,22 +736,7 @@ def _validate_trial(
 ) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "case_id",
-            "evaluation_id",
-            "trial_id",
-            "source_order",
-            "pairing_key",
-            "status",
-            "label",
-            "score",
-            "reason",
-            "details",
-            "error",
-            "provenance",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["trial"]),
         f"trial[{index}]",
     )
     for name in ("case_id", "evaluation_id", "trial_id"):
@@ -876,14 +803,7 @@ def _validate_trial(
 def _validate_critical(value: Any, limits: Limits, index: int) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "group_id",
-            "title",
-            "declaration_source",
-            "rationale",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["critical_group"]),
         f"critical_group[{index}]",
     )
     _id(obj["group_id"], f"critical_group[{index}].group_id")
@@ -899,19 +819,7 @@ def _validate_invariance(
 ) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "group_id",
-            "member_case_ids",
-            "transformation_id",
-            "transformation_version",
-            "expected_relation",
-            "relation_parameters",
-            "severity",
-            "declaration_source",
-            "rationale",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["invariance_group"]),
         f"invariance_group[{index}]",
     )
     for name in ("group_id", "transformation_id", "transformation_version"):
@@ -990,20 +898,7 @@ def _validate_invariance(
 def _validate_anchor_set(value: Any, limits: Limits, index: int) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "anchor_set_id",
-            "label_space",
-            "protocol_id",
-            "protocol_version",
-            "aggregation_method",
-            "clustering_unit",
-            "source_revision",
-            "source_sha256",
-            "license",
-            "provenance",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["anchor_set"]),
         f"anchor_set[{index}]",
     )
     for name in ("anchor_set_id", "protocol_id", "protocol_version"):
@@ -1030,23 +925,7 @@ def _validate_anchor_set(value: Any, limits: Limits, index: int) -> dict[str, An
 def _validate_anchor(value: Any, limits: Limits, index: int) -> dict[str, Any]:
     obj = _exact_fields(
         value,
-        {
-            "record_type",
-            "anchor_id",
-            "anchor_set_id",
-            "case_id",
-            "cluster_id",
-            "annotation_id",
-            "annotator_id",
-            "kind",
-            "status",
-            "label",
-            "reason",
-            "aggregation_inputs",
-            "adjudication_rationale",
-            "provenance",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["anchor"]),
         f"anchor[{index}]",
     )
     for name in (
@@ -1347,59 +1226,6 @@ def load_artifact(path: Path, *, limits: Limits | None = None) -> AssuranceArtif
     )
 
 
-_METRIC_SIGNATURES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "corpus_equal": (frozenset({"all_cases"}), frozenset()),
-    "context_isolated": (frozenset({"all_cases"}), frozenset()),
-    "determinate_coverage": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"role"}),
-    ),
-    "determinate_coverage_delta": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset(),
-    ),
-    "status_count": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"role", "status"}),
-    ),
-    "new_status_count": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"status"}),
-    ),
-    "determinate_label_count": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"role", "label"}),
-    ),
-    "determinate_label_transition_count": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"from_label", "to_label"}),
-    ),
-    "critical_regression_count": (
-        frozenset({"critical_group"}),
-        frozenset({"from_label", "to_label"}),
-    ),
-    "unstable_case_count": (
-        frozenset({"all_cases", "critical_group"}),
-        frozenset({"role", "dimension"}),
-    ),
-    "invariance_violation_count": (
-        frozenset({"all_cases", "invariance_group"}),
-        frozenset({"role"}),
-    ),
-    "invariance_not_evaluable_count": (
-        frozenset({"all_cases", "invariance_group"}),
-        frozenset({"role"}),
-    ),
-    "anchor_coverage": (frozenset({"anchor_set"}), frozenset()),
-    "anchor_disagreement_count": (frozenset({"anchor_set"}), frozenset({"role"})),
-    "provenance_present": (
-        frozenset({"provenance"}),
-        frozenset({"owner_type", "field"}),
-    ),
-    "score_delta": (frozenset({"all_cases", "critical_group"}), frozenset()),
-}
-
-
 def load_contract(
     path: Path | None, artifact: AssuranceArtifact
 ) -> AssuranceContract | None:
@@ -1415,14 +1241,7 @@ def load_contract(
     _check_shape(document, artifact.limits, "$contract")
     obj = _exact_fields(
         document,
-        {
-            "schema_version",
-            "contract_id",
-            "contract_version",
-            "applies_to_input_schema",
-            "rules",
-            "extensions",
-        },
+        set(FIELD_REGISTRY["contract"]),
         "contract",
     )
     if (
@@ -1451,19 +1270,7 @@ def load_contract(
         "anchor_set": anchor_set_ids,
         "anchor": {item["anchor_id"] for item in artifact.anchors},
     }
-    rule_fields = {
-        "rule_id",
-        "severity",
-        "scope",
-        "scope_id",
-        "metric",
-        "operator",
-        "threshold",
-        "parameters",
-        "missing_evidence",
-        "rationale",
-        "extensions",
-    }
+    rule_fields = set(FIELD_REGISTRY["rule"])
     for index, raw in enumerate(rules):
         rule = _exact_fields(raw, rule_fields, f"contract.rules[{index}]")
         rule_id = _id(rule["rule_id"], f"contract.rules[{index}].rule_id")
@@ -1478,7 +1285,7 @@ def load_contract(
         operator = _enum(
             rule["operator"], OPERATORS, f"contract.rules[{index}].operator"
         )
-        allowed_scopes, parameters = _METRIC_SIGNATURES[metric]
+        allowed_scopes, parameters = METRIC_SIGNATURES[metric]
         if scope not in allowed_scopes:
             raise PolicyConfigurationError("Contract metric uses an unsupported scope.")
         scope_id = rule["scope_id"]

@@ -19,8 +19,10 @@ evalcanary migrate \
   --out evaluator-assurance-report
 ```
 
-The output directory contains `report.json`, `report.md`, and `report.html`.
-All three are projections of the same canonical report model. The JSON is the
+The output directory contains `report.json`, `report.md`, `report.html`,
+`review-queue.json`, and `review-queue.md`. The queue is a pure derivative of
+the canonical report and does not change report or contract status. Legacy
+`diff` output remains the historical three-report bundle. The report JSON is the
 exhaustive deterministic UTF-8 record without a BOM. Markdown and HTML are
 bounded decision-review projections: they identify the JSON by SHA-256, report
 what detail was displayed or omitted, and retain complete contract decisions
@@ -34,6 +36,38 @@ Exit statuses are:
 - `3`: invalid input/configuration, non-comparable evidence, or safe execution
   failure;
 - `4`: system or contract review is required.
+
+Authoring preflight validates without evaluating policy or writing a packet:
+
+```console
+evalcanary migrate --preflight --input evaluator-assurance.jsonl \
+  [--contract evaluator-contract.json] [--limits local-limits.json]
+```
+
+Its only exits are `0` (valid enough to execute `migrate`) and `3` (invalid or
+preflight failure). A valid contract that would later hard-fail or require
+review still passes preflight.
+
+## Structural schemas and runtime semantics
+
+The four bundled Draft 2020-12 schemas are available offline with stable URN
+identifiers:
+
+```console
+evalcanary schema input-record
+evalcanary schema contract
+evalcanary schema report
+evalcanary schema review-queue
+```
+
+`STRUCTURAL_SCHEMA` validates one JSON value's fields, types, enums, and
+structurally expressible combinations. `RUNTIME_SEMANTICS` remains normative
+for JSONL ordering, byte/numeric limits, duplicate keys, manifest
+recomputation, cross-record identities and references, pairing, ownership,
+context comparability, contract evaluation, and whole-artifact resource facts.
+The schemas neither replace the runtime validators nor use network resolution.
+A shared registry generates their canonical bytes, and release checks fail on
+checked-in byte drift.
 
 ## Input schema
 

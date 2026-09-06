@@ -17,6 +17,6 @@ __all__ = [
     "build_review_queue",
     "load_artifact",
     "load_contract",
-    "write_report_bundle",
     "verify_review_queue_binding",
+    "write_report_bundle",
 ]
