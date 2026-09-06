@@ -5,6 +5,7 @@ include tests/test_assurance_engine_contract.py
 include tests/test_assurance_numeric_security.py
 include tests/test_assurance_render_cli.py
 include tests/test_assurance_schema.py
+include tests/test_assurance_review_queue.py
 include tests/test_cli.py
 include tests/test_compare_policy.py
 include tests/test_io.py

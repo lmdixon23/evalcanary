@@ -16,6 +16,11 @@ from typing import Any
 
 from ..errors import InputValidationError
 from .numeric import canonical_json_bytes, canonical_json_text, iter_canonical_json
+from .review_queue import (
+    build_review_queue,
+    review_queue_markdown,
+    verify_review_queue_binding,
+)
 from .schema import Limits
 
 _DETAIL_CAPS = {"violated": 50, "not_evaluable": 25, "satisfied": 10}
@@ -1397,13 +1402,18 @@ def write_report_bundle(
     limits: Limits,
     source_paths: tuple[Path, ...] = (),
 ) -> tuple[Path, Path, Path]:
-    """Preflight all formats, then write temporary siblings and atomically replace."""
+    """Preflight and atomically publish the five-member migrate packet."""
 
     output_directory = _absolute(output_directory)
-    targets = (
+    report_targets = (
         output_directory / "report.json",
         output_directory / "report.md",
         output_directory / "report.html",
+    )
+    targets = (
+        *report_targets,
+        output_directory / "review-queue.json",
+        output_directory / "review-queue.md",
     )
     _reject_source_aliases(output_directory, targets, source_paths)
     _validate_path_chain(output_directory, leaf_kind="directory_or_missing")
@@ -1414,10 +1424,24 @@ def write_report_bundle(
     markdown_data, html_data, sizes = _stabilized_human_reports(
         report, json_size=json_size, json_sha256=json_sha256, limits=limits
     )
+    queue = build_review_queue(report)
+    verify_review_queue_binding(report, queue)
+    queue_json_data = canonical_json_bytes(queue) + b"\n"
+    queue_markdown_data = review_queue_markdown(queue).encode("utf-8")
+    limits.enforce(
+        "json_report_bytes", len(queue_json_data), field_path="$review_queue"
+    )
+    limits.enforce(
+        "markdown_report_bytes",
+        len(queue_markdown_data),
+        field_path="$review_queue",
+    )
     for name, size in sizes.items():
         limits.enforce(name, size, field_path="$report")
     limits.enforce(
-        "combined_report_bytes", sum(sizes.values()), field_path="$report_bundle"
+        "combined_report_bytes",
+        sum(sizes.values()) + len(queue_json_data) + len(queue_markdown_data),
+        field_path="$report_bundle",
     )
     try:
         output_directory.mkdir(parents=True, exist_ok=True)
@@ -1444,6 +1468,8 @@ def write_report_bundle(
         for target, data, size_name in (
             (targets[1], markdown_data, "markdown_report_bytes"),
             (targets[2], html_data, "html_report_bytes"),
+            (targets[3], queue_json_data, "json_report_bytes"),
+            (targets[4], queue_markdown_data, "markdown_report_bytes"),
         ):
             prepared.append(
                 _write_temporary(
@@ -1451,7 +1477,9 @@ def write_report_bundle(
                     (data,),
                     output_directory=output_directory,
                     topology=topology,
-                    expected_size=sizes[size_name],
+                    expected_size=(
+                        sizes[size_name] if target in report_targets else len(data)
+                    ),
                 )
             )
         for target in targets:
@@ -1539,4 +1567,4 @@ def write_report_bundle(
             for _, backup, _, _ in backups:
                 with suppress(OSError):
                     os.unlink(backup)
-    return targets
+    return report_targets
