@@ -14,6 +14,7 @@ from .assurance.engine import exit_code_for_report
 from .assurance.numeric import canonical_json_text
 from .assurance.preflight import preflight_paths
 from .assurance.renderers import write_report_bundle
+from .assurance.scaffold import create_scaffold
 from .assurance.schema import Limits, load_artifact, load_contract
 from .assurance.structural import canonical_schema_bytes
 from .compare import compare_verdicts
@@ -168,6 +169,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="input-record, contract, report, or review-queue",
     )
 
+    init = sub.add_parser(
+        "init",
+        help="Create an inert evaluator-assurance authoring scaffold.",
+    )
+    init.add_argument(
+        "--judgment",
+        choices=("categorical", "numeric", "categorical_and_numeric"),
+        required=True,
+    )
+    init.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        help="Explicit categorical label; repeat for every label.",
+    )
+    init.add_argument("--out", type=Path, required=True)
+
     return parser
 
 
@@ -321,6 +339,16 @@ def _run_schema(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _run_init(args: argparse.Namespace) -> int:
+    output = create_scaffold(
+        judgment=args.judgment,
+        labels=args.label,
+        output=args.out,
+    )
+    print(f"Created inert evaluator-assurance scaffold: {output}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_args = list(sys.argv[1:] if argv is None else argv)
@@ -336,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_migrate(args)
         if args.command == "schema":
             return _run_schema(args)
+        if args.command == "init":
+            return _run_init(args)
         parser.error("Unknown command.")
     except EvalCanaryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

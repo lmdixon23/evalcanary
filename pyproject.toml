@@ -63,6 +63,7 @@ where = ["src"]
 evalcanary = [
   "py.typed",
   "examples/exact_match/*",
+  "examples/assurance/*",
   "assurance/schemas/*.schema.json",
 ]
 

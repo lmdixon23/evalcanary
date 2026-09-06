@@ -69,6 +69,28 @@ The schemas neither replace the runtime validators nor use network resolution.
 A shared registry generates their canonical bytes, and release checks fail on
 checked-in byte drift.
 
+## Inert scaffold and producer
+
+Start an authoring directory without choosing migration policy:
+
+```console
+evalcanary init --judgment categorical --label pass --label fail --out assurance-start
+```
+
+Numeric and `categorical_and_numeric` judgment choices are also supported. The
+scaffold is intentionally inert: mapping code stops at explicit TODOs for
+status mapping, parser/aggregation ownership, pairing, invariance, context
+exceptions, anchor interpretation, and contract policy. It emits no contract.
+
+`evalcanary.assurance.producer` provides `AssurancePacket`, `Evaluation`,
+`component_value`, `sha256_bytes`, and `sha256_value`. Fingerprints are required
+inputs to `Evaluation`; the two hash helpers act only on exact values passed by
+the caller. The producer never derives identity from names, files, imports,
+objects, environments, package metadata, or time. Finalization orders records,
+fills only explicitly confirmed `not_applicable` inventory slots, computes the
+manifest, runs the normative runtime validator, and only then atomically writes
+the final JSONL artifact.
+
 ## Input schema
 
 `evaluator-assurance-input-v1` is strict UTF-8 JSONL. The first and only header
