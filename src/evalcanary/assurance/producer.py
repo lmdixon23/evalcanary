@@ -13,6 +13,7 @@ import os
 import stat
 import tempfile
 import uuid
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
@@ -22,14 +23,26 @@ from typing import Any
 
 from ..errors import InputValidationError
 from .constants import (
+    CONTRACT_SCHEMA,
     FIXED_CONTEXT_COMPONENTS,
     FIXED_EVALUATOR_COMPONENTS,
     INPUT_SCHEMA,
     MANIFEST_ALGORITHM,
+    METRICS,
     MOVABLE_COMPONENTS,
+    OPERATORS,
+    SCOPES,
+    SEVERITIES,
 )
 from .numeric import canonical_json_bytes, canonical_sha256
-from .schema import Limits, compute_manifest_sha256, load_artifact
+from .schema import (
+    AssuranceArtifact,
+    Limits,
+    compute_manifest_sha256,
+    load_artifact,
+    load_contract,
+)
+from .structural import METRIC_SIGNATURES
 
 ComponentValue = dict[str, Any]
 Record = dict[str, Any]
@@ -74,6 +87,133 @@ def _copy_map(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return deepcopy(dict(value or {}))
 
 
+def _name_list(values: Collection[str]) -> str:
+    return "[" + ", ".join(sorted(values)) + "]"
+
+
+def _requirements(
+    ownership: Mapping[str, str],
+) -> tuple[set[str], set[str], dict[str, str]]:
+    supplied = dict(ownership)
+    missing = set(MOVABLE_COMPONENTS) - set(supplied)
+    unexpected = set(supplied) - set(MOVABLE_COMPONENTS)
+    invalid = {
+        name
+        for name in MOVABLE_COMPONENTS & set(supplied)
+        if supplied[name] not in {"evaluator", "context"}
+    }
+    if missing or unexpected or invalid:
+        raise InputValidationError(
+            "Component ownership is invalid; "
+            f"missing={_name_list(missing)}; "
+            f"unexpected={_name_list(unexpected)}; "
+            f"invalid_owner={_name_list(invalid)}."
+        )
+    evaluator = set(FIXED_EVALUATOR_COMPONENTS)
+    context = set(FIXED_CONTEXT_COMPONENTS)
+    for name in sorted(MOVABLE_COMPONENTS):
+        (evaluator if supplied[name] == "evaluator" else context).add(name)
+    return evaluator, context, supplied
+
+
+def component_requirements(
+    ownership: Mapping[str, str],
+) -> dict[str, tuple[str, ...]]:
+    """Return the complete deterministic inventory required by explicit ownership."""
+
+    evaluator, context, _ = _requirements(ownership)
+    return {
+        "evaluator_components": tuple(sorted(evaluator)),
+        "context_components": tuple(sorted(context)),
+    }
+
+
+def _checked_component_map(
+    values: Mapping[str, ComponentValue],
+    inventory_name: str,
+) -> dict[str, ComponentValue]:
+    result: dict[str, ComponentValue] = {}
+    for name, raw in values.items():
+        if not isinstance(name, str) or not isinstance(raw, Mapping):
+            raise InputValidationError(
+                f"The {inventory_name} inventory contains an invalid declaration."
+            )
+        if set(raw) != {"presence", "identity", "sha256"}:
+            raise InputValidationError(
+                f"The {inventory_name} inventory declaration for {name} has "
+                "invalid fields."
+            )
+        try:
+            result[name] = component_value(
+                raw["presence"],
+                identity=raw["identity"],
+                sha256=raw["sha256"],
+            )
+        except InputValidationError as exc:
+            raise InputValidationError(
+                f"The {inventory_name} inventory declaration for {name} is invalid."
+            ) from exc
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentInventories:
+    """Complete component facts bound to one explicit ownership declaration."""
+
+    component_ownership: Mapping[str, str]
+    evaluator_components: Mapping[str, ComponentValue]
+    context_components: Mapping[str, ComponentValue]
+
+
+def complete_components(
+    *,
+    ownership: Mapping[str, str],
+    evaluator_components: Mapping[str, ComponentValue],
+    context_components: Mapping[str, ComponentValue],
+    confirm_unlisted_not_applicable: bool = False,
+) -> ComponentInventories:
+    """Complete unlisted owned components only after an explicit affirmation.
+
+    The confirmation means that every owned component not explicitly declared
+    present, missing, intentionally_omitted, or not_applicable is affirmed to be
+    not applicable. Explicit declarations always win; no presence is inferred.
+    """
+
+    if confirm_unlisted_not_applicable is not True:
+        raise InputValidationError(
+            "Bulk not_applicable completion requires "
+            "confirm_unlisted_not_applicable=True."
+        )
+    expected_evaluator, expected_context, supplied_ownership = _requirements(ownership)
+    evaluator = _checked_component_map(
+        evaluator_components, "evaluator_components"
+    )
+    context = _checked_component_map(context_components, "context_components")
+    duplicates = set(evaluator) & set(context)
+    evaluator_unexpected = set(evaluator) - expected_evaluator
+    context_unexpected = set(context) - expected_context
+    if duplicates or evaluator_unexpected or context_unexpected:
+        raise InputValidationError(
+            "Component inventories contradict declared ownership; "
+            f"evaluator_components unexpected={_name_list(evaluator_unexpected)}; "
+            f"context_components unexpected={_name_list(context_unexpected)}; "
+            f"duplicate_across_sides={_name_list(duplicates)}."
+        )
+    for name in sorted(expected_evaluator - set(evaluator)):
+        evaluator[name] = component_value("not_applicable")
+    for name in sorted(expected_context - set(context)):
+        context[name] = component_value("not_applicable")
+    return ComponentInventories(
+        component_ownership=dict(sorted(supplied_ownership.items())),
+        evaluator_components={
+            name: deepcopy(evaluator[name]) for name in sorted(evaluator)
+        },
+        context_components={
+            name: deepcopy(context[name]) for name in sorted(context)
+        },
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Evaluation:
     """Explicit evaluator/context identity and component evidence for one role."""
@@ -92,29 +232,22 @@ class Evaluation:
     provenance: Mapping[str, ComponentValue] = field(default_factory=dict)
 
     def document(self, ownership: Mapping[str, str]) -> Record:
-        evaluator_names = set(FIXED_EVALUATOR_COMPONENTS)
-        context_names = set(FIXED_CONTEXT_COMPONENTS)
-        for name in MOVABLE_COMPONENTS:
-            owner = ownership.get(name)
-            if owner == "evaluator":
-                evaluator_names.add(name)
-            elif owner == "context":
-                context_names.add(name)
-            else:
-                raise InputValidationError(
-                    "Parser and aggregation-policy ownership must be explicit."
-                )
+        evaluator_names, context_names, _ = _requirements(ownership)
         evaluator = self._inventory(
             evaluator_names,
             self.evaluator_components,
             self.evaluator_not_applicable,
             "evaluator",
+            self.role,
+            self.evaluation_id,
         )
         context = self._inventory(
             context_names,
             self.context_components,
             self.context_not_applicable,
             "context",
+            self.role,
+            self.evaluation_id,
         )
         return {
             "evaluation_id": self.evaluation_id,
@@ -135,26 +268,182 @@ class Evaluation:
         supplied: Mapping[str, ComponentValue],
         confirmed_not_applicable: Collection[str],
         inventory_name: str,
+        role: str,
+        evaluation_id: str,
     ) -> dict[str, ComponentValue]:
-        supplied_names = set(supplied)
-        confirmed = set(confirmed_not_applicable)
-        if supplied_names & confirmed:
+        checked_supplied = _checked_component_map(
+            supplied, f"{inventory_name}_components"
+        )
+        confirmed_items = list(confirmed_not_applicable)
+        if not all(isinstance(name, str) for name in confirmed_items):
             raise InputValidationError(
-                f"The {inventory_name} inventory declares a component twice."
+                f"The {inventory_name} inventory for role={role} "
+                f"evaluation={evaluation_id} contains an invalid component name."
             )
-        if supplied_names | confirmed != expected:
+        supplied_names = set(checked_supplied)
+        confirmed = set(confirmed_items)
+        repeated_confirmations = {
+            name
+            for name, count in Counter(confirmed_items).items()
+            if count > 1
+        }
+        duplicates = (supplied_names & confirmed) | repeated_confirmations
+        declared = supplied_names | confirmed
+        missing = expected - declared
+        unexpected = declared - expected
+        if missing or unexpected or duplicates:
             raise InputValidationError(
-                f"The {inventory_name} inventory must explicitly supply or confirm "
-                "not_applicable for every owned component."
+                f"{role} evaluation {evaluation_id} {inventory_name}_components "
+                "inventory is invalid; "
+                f"missing={_name_list(missing)}; "
+                f"unexpected={_name_list(unexpected)}; "
+                f"duplicate_supplied_or_not_applicable={_name_list(duplicates)}."
             )
         return {
             name: (
-                deepcopy(supplied[name])
-                if name in supplied
+                deepcopy(checked_supplied[name])
+                if name in checked_supplied
                 else component_value("not_applicable")
             )
             for name in sorted(expected)
         }
+
+
+def make_evaluation(
+    *,
+    evaluation_id: str,
+    role: str,
+    evaluator_id: str,
+    evaluator_version: str,
+    evaluator_fingerprint_sha256: str,
+    context_id: str,
+    context_fingerprint_sha256: str,
+    component_ownership: Mapping[str, str],
+    components: ComponentInventories,
+    provenance: Mapping[str, ComponentValue],
+) -> Evaluation:
+    """Create an Evaluation from complete facts without choosing any semantics."""
+
+    _, _, checked_ownership = _requirements(component_ownership)
+    if checked_ownership != dict(components.component_ownership):
+        raise InputValidationError(
+            "Evaluation component ownership does not match completed inventories."
+        )
+    return Evaluation(
+        evaluation_id=evaluation_id,
+        role=role,
+        evaluator_id=evaluator_id,
+        evaluator_version=evaluator_version,
+        evaluator_fingerprint_sha256=evaluator_fingerprint_sha256,
+        context_id=context_id,
+        context_fingerprint_sha256=context_fingerprint_sha256,
+        evaluator_components=deepcopy(dict(components.evaluator_components)),
+        context_components=deepcopy(dict(components.context_components)),
+        provenance=_copy_map(provenance),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Rule:
+    """One semantics-explicit contract rule from the closed metric vocabulary."""
+
+    rule_id: str
+    severity: str
+    scope: str
+    scope_id: str | None
+    metric: str
+    parameters: Mapping[str, Any]
+    operator: str
+    threshold: Any
+    missing_evidence: str
+    rationale: str
+    extensions: Mapping[str, Any] = field(default_factory=dict)
+
+    def document(self) -> Record:
+        if self.metric not in METRICS:
+            raise InputValidationError("Contract rule metric is not registered.")
+        if self.severity not in SEVERITIES:
+            raise InputValidationError("Contract rule severity is not registered.")
+        if self.scope not in SCOPES:
+            raise InputValidationError("Contract rule scope is not registered.")
+        if self.operator not in OPERATORS:
+            raise InputValidationError("Contract rule operator is not registered.")
+        if self.missing_evidence not in {"hard_fail", "review", "info"}:
+            raise InputValidationError(
+                "Contract rule missing-evidence policy is not registered."
+            )
+        allowed_scopes, required_parameters = METRIC_SIGNATURES[self.metric]
+        if self.scope not in allowed_scopes:
+            raise InputValidationError(
+                "Contract rule metric uses an unsupported scope."
+            )
+        supplied_parameters = set(self.parameters)
+        missing = set(required_parameters) - supplied_parameters
+        unexpected = supplied_parameters - set(required_parameters)
+        if missing or unexpected:
+            raise InputValidationError(
+                f"Contract rule {self.rule_id} parameters are invalid; "
+                f"missing={_name_list(missing)}; "
+                f"unexpected={_name_list(unexpected)}."
+            )
+        return {
+            "rule_id": self.rule_id,
+            "severity": self.severity,
+            "scope": self.scope,
+            "scope_id": self.scope_id,
+            "metric": self.metric,
+            "operator": self.operator,
+            "threshold": deepcopy(self.threshold),
+            "parameters": _copy_map(self.parameters),
+            "missing_evidence": self.missing_evidence,
+            "rationale": self.rationale,
+            "extensions": _copy_map(self.extensions),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Contract:
+    """Small deterministic contract authoring surface with no policy defaults."""
+
+    contract_id: str
+    contract_version: str
+    rules: Collection[Rule]
+    extensions: Mapping[str, Any] = field(default_factory=dict)
+
+    def document(self) -> Record:
+        rules = sorted(
+            (rule.document() for rule in self.rules),
+            key=lambda item: item["rule_id"],
+        )
+        if not rules:
+            raise InputValidationError("Contract rules must be non-empty.")
+        rule_ids = [item["rule_id"] for item in rules]
+        if len(rule_ids) != len(set(rule_ids)):
+            raise InputValidationError("Contract rule IDs must be unique.")
+        return {
+            "schema_version": CONTRACT_SCHEMA,
+            "contract_id": self.contract_id,
+            "contract_version": self.contract_version,
+            "applies_to_input_schema": INPUT_SCHEMA,
+            "rules": rules,
+            "extensions": _copy_map(self.extensions),
+        }
+
+    def canonical_bytes(self) -> bytes:
+        """Serialize deterministically; artifact-bound semantics validate on write."""
+
+        return canonical_json_bytes(self.document()) + b"\n"
+
+    def write(self, path: Path, *, artifact: AssuranceArtifact) -> Path:
+        """Normatively validate against an artifact, then atomically publish."""
+
+        data = self.canonical_bytes()
+        return _atomic_write_bytes(
+            path,
+            data,
+            description="Contract output",
+            validator=lambda candidate: load_contract(candidate, artifact),
+        )
 
 
 class AssurancePacket:
@@ -223,6 +512,15 @@ class AssurancePacket:
         )
         return self
 
+    def add_cases(
+        self, cases: Sequence[Mapping[str, Any]]
+    ) -> AssurancePacket:
+        """Add already-semantic normalized case declarations in one call."""
+
+        for case in cases:
+            self.add_case(**deepcopy(dict(case)))
+        return self
+
     def add_trial(
         self,
         *,
@@ -258,6 +556,15 @@ class AssurancePacket:
                 "extensions": _copy_map(extensions),
             }
         )
+        return self
+
+    def add_trials(
+        self, trials: Sequence[Mapping[str, Any]]
+    ) -> AssurancePacket:
+        """Add already-semantic normalized trial declarations in one call."""
+
+        for trial in trials:
+            self.add_trial(**deepcopy(dict(trial)))
         return self
 
     def add_critical_group(
@@ -384,6 +691,15 @@ class AssurancePacket:
         )
         return self
 
+    def add_anchors(
+        self, anchors: Sequence[Mapping[str, Any]]
+    ) -> AssurancePacket:
+        """Add already-semantic normalized anchor declarations in one call."""
+
+        for anchor in anchors:
+            self.add_anchor(**deepcopy(dict(anchor)))
+        return self
+
     def canonical_records(self) -> tuple[Record, ...]:
         """Finalize records in stable identity order and compute the manifest."""
 
@@ -456,35 +772,7 @@ class AssurancePacket:
         """Validate first, then atomically publish one canonical JSONL file."""
 
         data = self.canonical_bytes(limits=limits)
-        target = _validate_target(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _validate_target(target)
-        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-        descriptor: int | None = None
-        try:
-            descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-                0o600,
-            )
-            with os.fdopen(descriptor, "wb") as handle:
-                descriptor = None
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _validate_target(target)
-            os.replace(temporary, target)
-        except OSError as exc:
-            raise InputValidationError(
-                "Producer output could not be written atomically."
-            ) from exc
-        finally:
-            if descriptor is not None:
-                with suppress(OSError):
-                    os.close(descriptor)
-            with suppress(FileNotFoundError):
-                temporary.unlink()
-        return target
+        return _atomic_write_bytes(path, data, description="Producer output")
 
 
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -532,11 +820,62 @@ def _validate_target(path: Path) -> Path:
     return target
 
 
+def _atomic_write_bytes(
+    path: Path,
+    data: bytes,
+    *,
+    description: str,
+    validator: Any = None,
+) -> Path:
+    target = _validate_target(path)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise InputValidationError(
+            f"{description} could not be written atomically."
+        ) from exc
+    _validate_target(target)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if validator is not None:
+            validator(temporary)
+        _validate_target(target)
+        os.replace(temporary, target)
+    except OSError as exc:
+        raise InputValidationError(
+            f"{description} could not be written atomically."
+        ) from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(FileNotFoundError):
+            temporary.unlink()
+    return target
+
+
 __all__ = [
     "AssurancePacket",
+    "ComponentInventories",
     "ComponentValue",
+    "Contract",
     "Evaluation",
+    "Rule",
+    "complete_components",
+    "component_requirements",
     "component_value",
+    "make_evaluation",
     "sha256_bytes",
     "sha256_value",
 ]

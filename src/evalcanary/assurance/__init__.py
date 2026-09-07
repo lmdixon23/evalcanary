@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 from .engine import build_report
-from .producer import AssurancePacket, Evaluation, component_value
+from .producer import (
+    AssurancePacket,
+    ComponentInventories,
+    Contract,
+    Evaluation,
+    Rule,
+    complete_components,
+    component_requirements,
+    component_value,
+    make_evaluation,
+)
 from .renderers import write_report_bundle
 from .review_queue import build_review_queue, verify_review_queue_binding
 from .schema import AssuranceArtifact, Limits, load_artifact, load_contract
@@ -14,13 +24,19 @@ __all__ = [
     "ASSURANCE_ENGINE_VERSION",
     "AssuranceArtifact",
     "AssurancePacket",
+    "ComponentInventories",
+    "Contract",
     "Evaluation",
     "Limits",
+    "Rule",
     "build_report",
     "build_review_queue",
+    "complete_components",
+    "component_requirements",
     "component_value",
     "load_artifact",
     "load_contract",
+    "make_evaluation",
     "verify_review_queue_binding",
     "write_report_bundle",
 ]
