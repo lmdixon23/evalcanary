@@ -37,6 +37,33 @@ Exit statuses are:
   failure;
 - `4`: system or contract review is required.
 
+## Review queue projection
+
+`review-queue.json` remains the exhaustive canonical derivative. Its
+unreleased `evaluator-assurance-review-queue-v1` schema was amended before
+public release to add `invariance_summary` and `workload_summary`, and to
+replace the vague ordinary-change reason with neutral `STATUS_TRANSITION`.
+No v2 was created because v1 has not been publicly released.
+
+The Markdown projection separates candidate invariance violations, candidate
+not-evaluable results, baseline violations, and baseline not-evaluable results.
+Candidate violations appear before expected baseline policy exclusions.
+Baseline not-evaluable facts with declared evidence-policy provenance are
+labelled as expected policy exclusions and grouped rather than allowed to
+dominate the worklist.
+
+Ordinary baseline-to-candidate status changes use `STATUS_TRANSITION` with
+the role, both statuses, case/trial identities, and report pointers. The
+machine queue retains every row; Markdown groups repeated transitions by role
+and status pair without describing them as better, worse, regressions, or
+improvements.
+
+Workload is reported both as queue items and unique logical review subjects.
+A logical subject is normatively the exact `(subject_type, subject_id)` pair,
+so multiple reason codes on the same pair are not presented as independent
+human tasks. Separate deterministic counts cover implicated cases and primary
+trial, invariance-group, rule, and anchor subjects.
+
 Authoring preflight validates without evaluating policy or writing a packet:
 
 ```console

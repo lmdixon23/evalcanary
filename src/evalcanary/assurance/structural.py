@@ -948,6 +948,8 @@ def _review_queue_schema() -> dict[str, Any]:
             "counts_by_review_rank",
             "counts_by_reason",
             "counts_by_disposition_source",
+            "invariance_summary",
+            "workload_summary",
             "items",
         }
     )
@@ -973,6 +975,45 @@ def _review_queue_schema() -> dict[str, Any]:
         "type": "object",
         "additionalProperties": {"type": "integer", "minimum": 0},
     }
+    invariance_role_summary = _object(
+        {
+            "satisfied": {"type": "integer", "minimum": 0},
+            "violated": {"type": "integer", "minimum": 0},
+            "not_evaluable": {"type": "integer", "minimum": 0},
+            "declared_policy_not_evaluable": {"type": "integer", "minimum": 0},
+        },
+        required={
+            "satisfied",
+            "violated",
+            "not_evaluable",
+            "declared_policy_not_evaluable",
+        },
+    )
+    workload_summary = _object(
+        {
+            "items": {"type": "integer", "minimum": 0},
+            "unique_cases": {"type": "integer", "minimum": 0},
+            "unique_trials": {"type": "integer", "minimum": 0},
+            "unique_invariance_groups": {"type": "integer", "minimum": 0},
+            "unique_rules": {"type": "integer", "minimum": 0},
+            "unique_anchors": {"type": "integer", "minimum": 0},
+            "overall_unique_logical_subjects": {
+                "type": "integer",
+                "minimum": 0,
+            },
+            "logical_subject_identity": {"const": "subject_type+subject_id"},
+        },
+        required={
+            "items",
+            "unique_cases",
+            "unique_trials",
+            "unique_invariance_groups",
+            "unique_rules",
+            "unique_anchors",
+            "overall_unique_logical_subjects",
+            "logical_subject_identity",
+        },
+    )
     item = _object(
         {
             "queue_item_id": _ref("sha256"),
@@ -1021,6 +1062,14 @@ def _review_queue_schema() -> dict[str, Any]:
                 "counts_by_review_rank": count_map,
                 "counts_by_reason": count_map,
                 "counts_by_disposition_source": count_map,
+                "invariance_summary": _object(
+                    {
+                        "baseline": invariance_role_summary,
+                        "candidate": invariance_role_summary,
+                    },
+                    required={"baseline", "candidate"},
+                ),
+                "workload_summary": workload_summary,
                 "items": {"type": "array", "items": item},
             },
             required=queue_fields,
