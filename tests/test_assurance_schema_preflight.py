@@ -65,6 +65,14 @@ class AssuranceSchemaPreflightTests(unittest.TestCase):
                 set(FIELD_REGISTRY[record_type]),
             )
             self.assertFalse(input_defs[record_type]["additionalProperties"])
+        queue_schema = schemas["review-queue"]
+        self.assertIn("invariance_summary", queue_schema["required"])
+        self.assertIn("workload_summary", queue_schema["required"])
+        reason_codes = queue_schema["properties"]["items"]["items"]["properties"][
+            "reason_code"
+        ]["enum"]
+        self.assertIn("STATUS_TRANSITION", reason_codes)
+        self.assertNotIn("OTHER_OBSERVED_CHANGE", reason_codes)
         verify_checked_in_schemas()
 
     def test_runtime_outputs_conform_to_closed_top_level_schema_fields(self) -> None:

@@ -34,7 +34,7 @@ REASON_RANKS: dict[str, int] = {
     "LABEL_CHANGED": 10,
     "SCORE_CHANGED": 10,
     "INFO_RULE_FINDING": 10,
-    "OTHER_OBSERVED_CHANGE": 10,
+    "STATUS_TRANSITION": 10,
 }
 DISPOSITION_SOURCES = frozenset(
     {
@@ -292,7 +292,7 @@ def _add_case_items(report: dict[str, Any], items: list[dict[str, Any]]) -> None
                     "error": "NEW_ERROR",
                     "abstain": "STATUS_TO_ABSTAIN",
                     "indeterminate": "STATUS_TO_INDETERMINATE",
-                }.get(after["status"], "OTHER_OBSERVED_CHANGE")
+                }.get(after["status"], "STATUS_TRANSITION")
                 _add_item(
                     items,
                     report_id=report_id,
@@ -306,6 +306,10 @@ def _add_case_items(report: dict[str, Any], items: list[dict[str, Any]]) -> None
                     pairing_key=pairing_key,
                     facts={
                         "case_id": case_id,
+                        "baseline_trial_id": before["trial_id"],
+                        "candidate_trial_id": after["trial_id"],
+                        "baseline_status": before["status"],
+                        "candidate_status": after["status"],
                         "from_status": before["status"],
                         "to_status": after["status"],
                         "critical_group_ids": critical_ids,
@@ -387,6 +391,31 @@ def _add_repeat_items(report: dict[str, Any], items: list[dict[str, Any]]) -> No
                 )
 
 
+def _has_declared_evidence_policy(
+    report: dict[str, Any],
+    group: dict[str, Any],
+    *,
+    role: str,
+    pairing_key: str | None,
+) -> bool:
+    cases = {item["case_id"]: item for item in report["cases"]}
+    for case_id in group["member_case_ids"]:
+        case = cases.get(case_id)
+        if case is None:
+            continue
+        for trial in case["trials"][role]:
+            if pairing_key is not None and trial["pairing_key"] != pairing_key:
+                continue
+            policy = trial.get("provenance", {}).get("evidence_policy")
+            if (
+                trial["status"] != "determinate"
+                and isinstance(policy, dict)
+                and policy.get("presence") == "present"
+            ):
+                return True
+    return False
+
+
 def _add_invariance_items(report: dict[str, Any], items: list[dict[str, Any]]) -> None:
     report_id = report["report_id"]
     for group_index, group in enumerate(report["invariance_groups"]):
@@ -423,6 +452,16 @@ def _add_invariance_items(report: dict[str, Any], items: list[dict[str, Any]]) -
                         "expected_relation": group["expected_relation"],
                         "declared_severity": group["severity"],
                         "result": result,
+                        "declared_evidence_policy": (
+                            role == "baseline"
+                            and result == "not_evaluable"
+                            and _has_declared_evidence_policy(
+                                report,
+                                group,
+                                role=role,
+                                pairing_key=instance["pairing_key"],
+                            )
+                        ),
                     },
                 )
 
@@ -520,6 +559,66 @@ def _add_comparability_items(report: dict[str, Any], items: list[dict[str, Any]]
         )
 
 
+def _invariance_summary(
+    report: dict[str, Any], items: list[dict[str, Any]]
+) -> dict[str, dict[str, int]]:
+    summary = {
+        role: {
+            "satisfied": 0,
+            "violated": 0,
+            "not_evaluable": 0,
+            "declared_policy_not_evaluable": 0,
+        }
+        for role in ("baseline", "candidate")
+    }
+    for group in report["invariance_groups"]:
+        for role in ("baseline", "candidate"):
+            for instance in group["roles"][role]:
+                summary[role][instance["result"]] += 1
+    for item in items:
+        if (
+            item["reason_code"] == "INVARIANCE_NOT_EVALUABLE"
+            and item["role"] in summary
+            and item["facts"].get("declared_evidence_policy") is True
+        ):
+            summary[item["role"]]["declared_policy_not_evaluable"] += 1
+    return summary
+
+
+def _workload_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    logical_subjects = {
+        (item["subject_type"], item["subject_id"]) for item in items
+    }
+    cases = {
+        item["subject_id"]
+        for item in items
+        if item["subject_type"] == "case"
+    }
+    cases.update(
+        item["facts"]["case_id"]
+        for item in items
+        if isinstance(item["facts"].get("case_id"), str)
+    )
+
+    def subjects(subject_type: str) -> set[str]:
+        return {
+            item["subject_id"]
+            for item in items
+            if item["subject_type"] == subject_type
+        }
+
+    return {
+        "items": len(items),
+        "unique_cases": len(cases),
+        "unique_trials": len(subjects("trial")),
+        "unique_invariance_groups": len(subjects("invariance_group")),
+        "unique_rules": len(subjects("rule")),
+        "unique_anchors": len(subjects("anchor")),
+        "overall_unique_logical_subjects": len(logical_subjects),
+        "logical_subject_identity": "subject_type+subject_id",
+    }
+
+
 def build_review_queue(report: dict[str, Any]) -> dict[str, Any]:
     """Build the exhaustive queue solely from facts in one canonical report."""
 
@@ -574,6 +673,8 @@ def build_review_queue(report: dict[str, Any]) -> dict[str, Any]:
             sorted(reasons.items(), key=lambda item: (REASON_RANKS[item[0]], item[0]))
         ),
         "counts_by_disposition_source": dict(sorted(dispositions.items())),
+        "invariance_summary": _invariance_summary(report, items),
+        "workload_summary": _workload_summary(items),
         "items": items,
     }
 
@@ -592,29 +693,164 @@ def verify_review_queue_binding(report: dict[str, Any], queue: dict[str, Any]) -
             resolve_pointer(report, pointer)
 
 
+def _view_group(
+    *,
+    reason: str,
+    heading: str,
+    matching: list[dict[str, Any]],
+    per_reason_limit: int,
+    aggregate_only: bool = False,
+) -> dict[str, Any]:
+    displayed = [] if aggregate_only else matching[:per_reason_limit]
+    return {
+        "reason_code": reason,
+        "review_rank": REASON_RANKS[reason],
+        "heading": heading,
+        "projection_mode": "aggregate_only" if aggregate_only else "bounded_items",
+        "total_count": len(matching),
+        "displayed_count": len(displayed),
+        "omitted_count": 0 if aggregate_only else len(matching) - len(displayed),
+        "suppressed_item_count": len(matching) if aggregate_only else 0,
+        "items": displayed,
+    }
+
+
 def queue_view_model(
     queue: dict[str, Any], *, per_reason_limit: int = 20
 ) -> dict[str, Any]:
-    """Create the one bounded view model used by the Markdown projection."""
+    """Create the one bounded, role-aware Markdown projection model."""
 
     if per_reason_limit < 1:
         raise ValueError("per_reason_limit must be positive")
     groups: list[dict[str, Any]] = []
-    for reason in sorted(
+    ordered_reasons = sorted(
         queue["counts_by_reason"], key=lambda value: (REASON_RANKS[value], value)
-    ):
-        matching = [item for item in queue["items"] if item["reason_code"] == reason]
-        displayed = matching[:per_reason_limit]
-        groups.append(
-            {
-                "reason_code": reason,
-                "review_rank": REASON_RANKS[reason],
-                "total_count": len(matching),
-                "displayed_count": len(displayed),
-                "omitted_count": len(matching) - len(displayed),
-                "items": displayed,
-            }
-        )
+    )
+    invariance_reasons = {
+        "INVARIANCE_VIOLATED",
+        "INVARIANCE_NOT_EVALUABLE",
+    }
+
+    def add_standard_reasons(reasons: list[str]) -> None:
+        for reason in reasons:
+            matching = [
+                item for item in queue["items"] if item["reason_code"] == reason
+            ]
+            if reason == "STATUS_TRANSITION":
+                group = _view_group(
+                    reason=reason,
+                    heading="Neutral status transitions (grouped)",
+                    matching=matching,
+                    per_reason_limit=per_reason_limit,
+                    aggregate_only=True,
+                )
+                transitions = Counter(
+                    (
+                        item["role"],
+                        item["facts"]["baseline_status"],
+                        item["facts"]["candidate_status"],
+                    )
+                    for item in matching
+                )
+                group["transition_groups"] = [
+                    {
+                        "role": role,
+                        "baseline_status": baseline_status,
+                        "candidate_status": candidate_status,
+                        "item_count": count,
+                    }
+                    for (role, baseline_status, candidate_status), count in sorted(
+                        transitions.items(),
+                        key=lambda item: (
+                            _ROLE_ORDER[item[0][0]],
+                            item[0][1],
+                            item[0][2],
+                        ),
+                    )
+                ]
+                groups.append(group)
+            else:
+                groups.append(
+                    _view_group(
+                        reason=reason,
+                        heading=reason,
+                        matching=matching,
+                        per_reason_limit=per_reason_limit,
+                    )
+                )
+
+    add_standard_reasons(
+        [
+            reason
+            for reason in ordered_reasons
+            if reason not in invariance_reasons and REASON_RANKS[reason] < 7
+        ]
+    )
+    invariance_specs = (
+        (
+            "candidate",
+            "INVARIANCE_VIOLATED",
+            "Candidate invariance violations",
+            False,
+            None,
+        ),
+        (
+            "candidate",
+            "INVARIANCE_NOT_EVALUABLE",
+            "Candidate invariance not-evaluable",
+            False,
+            None,
+        ),
+        (
+            "baseline",
+            "INVARIANCE_VIOLATED",
+            "Baseline invariance violations",
+            False,
+            None,
+        ),
+        (
+            "baseline",
+            "INVARIANCE_NOT_EVALUABLE",
+            "Expected baseline policy exclusions",
+            True,
+            True,
+        ),
+        (
+            "baseline",
+            "INVARIANCE_NOT_EVALUABLE",
+            "Baseline invariance not-evaluable",
+            False,
+            False,
+        ),
+    )
+    for role, reason, heading, aggregate_only, policy_value in invariance_specs:
+        matching = [
+            item
+            for item in queue["items"]
+            if item["reason_code"] == reason
+            and item["role"] == role
+            and (
+                policy_value is None
+                or item["facts"].get("declared_evidence_policy") is policy_value
+            )
+        ]
+        if matching:
+            groups.append(
+                _view_group(
+                    reason=reason,
+                    heading=heading,
+                    matching=matching,
+                    per_reason_limit=per_reason_limit,
+                    aggregate_only=aggregate_only,
+                )
+            )
+    add_standard_reasons(
+        [
+            reason
+            for reason in ordered_reasons
+            if reason not in invariance_reasons and REASON_RANKS[reason] > 7
+        ]
+    )
     return {
         "source_report_id": queue["source_report_id"],
         "source_report_sha256": queue["source_report_sha256"],
@@ -622,6 +858,8 @@ def queue_view_model(
         "counts_by_review_rank": queue["counts_by_review_rank"],
         "counts_by_reason": queue["counts_by_reason"],
         "counts_by_disposition_source": queue["counts_by_disposition_source"],
+        "invariance_summary": queue["invariance_summary"],
+        "workload_summary": queue["workload_summary"],
         "groups": groups,
     }
 
@@ -630,19 +868,87 @@ def review_queue_markdown(queue: dict[str, Any], *, per_reason_limit: int = 20) 
     """Render a bounded, content-free human projection of the queue."""
 
     view = queue_view_model(queue, per_reason_limit=per_reason_limit)
+    workload = view["workload_summary"]
+    invariance = view["invariance_summary"]
+    candidate = invariance["candidate"]
+    baseline = invariance["baseline"]
     lines = [
         "# Evaluator-assurance review queue",
         "",
-        f"- Total attention items: **{view['item_count']}**",
+        f"- Queue items: **{view['item_count']}**",
+        (
+            "- Unique logical review subjects: "
+            f"**{workload['overall_unique_logical_subjects']}**"
+        ),
         f"- Source report ID: `{view['source_report_id']}`",
         f"- Source report SHA-256: `{view['source_report_sha256']}`",
         "- Priority is review ordering only; it is not correctness or semantic severity.",
         "",
+        "## Review workload",
+        "",
+        (
+            "Logical-subject identity is the exact pair "
+            "`(subject_type, subject_id)`; multiple reason codes on that pair "
+            "remain one logical review subject."
+        ),
+        "",
+        "| Measure | Count |",
+        "| --- | ---: |",
+        f"| Queue items | {workload['items']} |",
+        f"| Unique cases | {workload['unique_cases']} |",
+        f"| Unique trials | {workload['unique_trials']} |",
+        (
+            "| Unique invariance groups | "
+            f"{workload['unique_invariance_groups']} |"
+        ),
+        f"| Unique rules | {workload['unique_rules']} |",
+        f"| Unique anchors | {workload['unique_anchors']} |",
+        (
+            "| Overall unique logical subjects | "
+            f"{workload['overall_unique_logical_subjects']} |"
+        ),
+        "",
+        "## Role-aware invariance projection",
+        "",
+        "| Role | Satisfied | Violated | Not evaluable | Declared-policy exclusions |",
+        "| --- | ---: | ---: | ---: | ---: |",
+        (
+            f"| Candidate | {candidate['satisfied']} | {candidate['violated']} | "
+            f"{candidate['not_evaluable']} | "
+            f"{candidate['declared_policy_not_evaluable']} |"
+        ),
+        (
+            f"| Baseline | {baseline['satisfied']} | {baseline['violated']} | "
+            f"{baseline['not_evaluable']} | "
+            f"{baseline['declared_policy_not_evaluable']} |"
+        ),
+        "",
+        (
+            "New candidate source errors: "
+            f"**{view['counts_by_reason'].get('NEW_ERROR', 0)}**."
+        ),
+    ]
+    if baseline["declared_policy_not_evaluable"]:
+        lines.extend(
+            [
+                (
+                    "Baseline declared-policy exclusions are expected "
+                    "not-evaluable consequences of the supplied baseline evidence "
+                    "policy. They are presented separately from candidate findings."
+                ),
+                "",
+            ]
+        )
+    else:
+        lines.append("")
+    lines.extend(
+        [
         "## Counts by review rank",
         "",
         "| Rank | Count |",
         "| ---: | ---: |",
-    ]
+        ]
+    )
     lines.extend(
         f"| {rank} | {count} |"
         for rank, count in view["counts_by_review_rank"].items()
@@ -677,15 +983,65 @@ def review_queue_markdown(queue: dict[str, Any], *, per_reason_limit: int = 20) 
     for group in view["groups"]:
         lines.extend(
             [
-                f"### Rank {group['review_rank']}: {group['reason_code']}",
-                "",
                 (
-                    f"Total: {group['total_count']}; displayed: "
-                    f"{group['displayed_count']}; omitted: {group['omitted_count']}."
+                    f"### Rank {group['review_rank']}: {group['heading']} "
+                    f"(`{group['reason_code']}`)"
                 ),
                 "",
             ]
         )
+        if group["projection_mode"] == "aggregate_only":
+            lines.extend(
+                [
+                    (
+                        f"Total: {group['total_count']}; displayed: 0 individual "
+                        f"items; grouped: {group['suppressed_item_count']}; "
+                        "omitted from canonical JSON: 0."
+                    ),
+                    (
+                        "The exhaustive machine queue retains every item and source "
+                        "pointer; this human projection groups the repetitive rows."
+                    ),
+                    "",
+                ]
+            )
+            if group["reason_code"] == "STATUS_TRANSITION":
+                lines.extend(
+                    [
+                        "| Role | Baseline status | Candidate status | Items |",
+                        "| --- | --- | --- | ---: |",
+                    ]
+                )
+                lines.extend(
+                    (
+                        f"| {item['role']} | `{item['baseline_status']}` | "
+                        f"`{item['candidate_status']}` | {item['item_count']} |"
+                    )
+                    for item in group["transition_groups"]
+                )
+                lines.append("")
+            elif group["heading"] == "Expected baseline policy exclusions":
+                lines.extend(
+                    [
+                        (
+                            "These baseline not-evaluable items carry declared "
+                            "evidence-policy facts and are grouped as expected policy "
+                            "exclusions."
+                        ),
+                        "",
+                    ]
+                )
+        else:
+            lines.extend(
+                [
+                    (
+                        f"Total: {group['total_count']}; displayed: "
+                        f"{group['displayed_count']}; omitted: "
+                        f"{group['omitted_count']}."
+                    ),
+                    "",
+                ]
+            )
         for item in group["items"]:
             qualifiers = [item["subject_type"], item["subject_id"]]
             if item["role"] is not None:
