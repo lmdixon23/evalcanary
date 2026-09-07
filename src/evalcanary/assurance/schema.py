@@ -459,13 +459,24 @@ def _validate_component_inventory(header: dict[str, Any], limits: Limits) -> Non
             evaluation["context_components"],
             f"header.evaluations[{index}].context_components",
         )
-        if set(evaluator_components) != expected_evaluator:
+        problems: list[str] = []
+        for inventory_name, supplied, expected in (
+            ("evaluator_components", set(evaluator_components), expected_evaluator),
+            ("context_components", set(context_components), expected_context),
+        ):
+            missing = sorted(expected - supplied)
+            unexpected = sorted(supplied - expected)
+            if missing or unexpected:
+                problems.append(
+                    f"{inventory_name} missing=[{', '.join(missing)}] "
+                    f"unexpected=[{', '.join(unexpected)}]"
+                )
+        if problems:
             raise InputValidationError(
-                "Evaluator component inventory does not match declared ownership."
-            )
-        if set(context_components) != expected_context:
-            raise InputValidationError(
-                "Context component inventory does not match declared ownership."
+                f"{evaluation['role']} evaluation {evaluation['evaluation_id']} "
+                "component inventory is invalid; "
+                + "; ".join(problems)
+                + "."
             )
         for name, item in evaluator_components.items():
             _component_value(

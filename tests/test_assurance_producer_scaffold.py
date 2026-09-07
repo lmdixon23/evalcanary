@@ -5,18 +5,31 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
 from decimal import Decimal
+from itertools import product
 from pathlib import Path
 
 from scripts.generate_assurance_examples import example_evaluation, example_packets
 
+from evalcanary.assurance.constants import (
+    FIXED_CONTEXT_COMPONENTS,
+    FIXED_EVALUATOR_COMPONENTS,
+    MOVABLE_COMPONENTS,
+)
+from evalcanary.assurance.numeric import canonical_json_bytes
 from evalcanary.assurance.producer import (
     AssurancePacket,
+    Contract,
+    Rule,
+    complete_components,
+    component_requirements,
     component_value,
+    make_evaluation,
     sha256_bytes,
     sha256_value,
 )
-from evalcanary.assurance.schema import load_artifact
+from evalcanary.assurance.schema import load_artifact, load_contract
 from evalcanary.cli import main
 from evalcanary.errors import InputValidationError
 
@@ -72,6 +85,254 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         with self.assertRaises(InputValidationError):
             component_value("present")
 
+    def test_public_component_requirements_match_authoritative_vocabulary(self) -> None:
+        for parser_owner, aggregation_owner in product(
+            ("evaluator", "context"), repeat=2
+        ):
+            ownership = {
+                "parser": parser_owner,
+                "aggregation_policy": aggregation_owner,
+            }
+            requirements = component_requirements(ownership)
+            expected_evaluator = set(FIXED_EVALUATOR_COMPONENTS)
+            expected_context = set(FIXED_CONTEXT_COMPONENTS)
+            for name, owner in ownership.items():
+                (expected_evaluator if owner == "evaluator" else expected_context).add(
+                    name
+                )
+            self.assertEqual(
+                requirements["evaluator_components"],
+                tuple(sorted(expected_evaluator)),
+            )
+            self.assertEqual(
+                requirements["context_components"],
+                tuple(sorted(expected_context)),
+            )
+        self.assertEqual(set(MOVABLE_COMPONENTS), {"parser", "aggregation_policy"})
+        with self.assertRaisesRegex(InputValidationError, r"missing=\[parser\]"):
+            component_requirements({"aggregation_policy": "evaluator"})
+
+    def test_bulk_not_applicable_is_explicit_and_preserves_overrides(self) -> None:
+        ownership = {"parser": "context", "aggregation_policy": "evaluator"}
+        declarations = {
+            "evaluator_components": {
+                "implementation": component_value(
+                    "present", identity="explicit-implementation"
+                ),
+                "rubric_prompt": component_value("missing"),
+            },
+            "context_components": {
+                "runtime": component_value("intentionally_omitted"),
+                "response_order": component_value("not_applicable"),
+            },
+        }
+        with self.assertRaisesRegex(
+            InputValidationError, "confirm_unlisted_not_applicable=True"
+        ):
+            complete_components(ownership=ownership, **declarations)
+        completed = complete_components(
+            ownership=ownership,
+            **declarations,
+            confirm_unlisted_not_applicable=True,
+        )
+        self.assertEqual(
+            completed.evaluator_components["rubric_prompt"]["presence"], "missing"
+        )
+        self.assertEqual(
+            completed.context_components["runtime"]["presence"],
+            "intentionally_omitted",
+        )
+        self.assertEqual(
+            completed.context_components["response_order"]["presence"],
+            "not_applicable",
+        )
+        self.assertEqual(
+            completed.evaluator_components["model_provider"]["presence"],
+            "not_applicable",
+        )
+        with self.assertRaisesRegex(InputValidationError, "duplicate_across_sides"):
+            complete_components(
+                ownership=ownership,
+                evaluator_components={
+                    "implementation": component_value(
+                        "present", identity="explicit-evaluator"
+                    )
+                },
+                context_components={
+                    "implementation": component_value(
+                        "present", identity="explicit-context"
+                    )
+                },
+                confirm_unlisted_not_applicable=True,
+            )
+
+    def test_inventory_diagnostics_are_field_specific_and_private_value_free(
+        self,
+    ) -> None:
+        incomplete = example_evaluation("candidate")
+        object.__setattr__(
+            incomplete,
+            "evaluator_components",
+            {
+                "implementation": component_value(
+                    "present", identity="PRIVATE_COMPONENT_IDENTITY"
+                ),
+                "unexpected_component": component_value(
+                    "present", sha256="1" * 64
+                ),
+            },
+        )
+        object.__setattr__(
+            incomplete,
+            "evaluator_not_applicable",
+            ["implementation", "implementation"],
+        )
+        with self.assertRaises(InputValidationError) as caught:
+            incomplete.document(
+                {"parser": "context", "aggregation_policy": "evaluator"}
+            )
+        message = str(caught.exception)
+        self.assertIn("candidate evaluation eval-candidate", message)
+        self.assertIn("evaluator_components", message)
+        self.assertIn(
+            "missing=[aggregation_policy, model_provider, rubric_prompt]", message
+        )
+        self.assertIn("unexpected=[unexpected_component]", message)
+        self.assertIn(
+            "duplicate_supplied_or_not_applicable=[implementation]", message
+        )
+        self.assertNotIn("PRIVATE_COMPONENT_IDENTITY", message)
+        self.assertNotIn("111111", message)
+
+    def test_runtime_inventory_diagnostic_lists_side_missing_and_unexpected(
+        self,
+    ) -> None:
+        records = list(deepcopy(_small_packet(("case-a",)).canonical_records()))
+        candidate = records[0]["evaluations"][1]
+        candidate["context_components"].pop("response_order")
+        candidate["context_components"]["unexpected_component"] = component_value(
+            "present", identity="PRIVATE_COMPONENT_IDENTITY"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "invalid.jsonl"
+            path.write_bytes(
+                b"\n".join(canonical_json_bytes(item) for item in records) + b"\n"
+            )
+            with self.assertRaises(InputValidationError) as caught:
+                load_artifact(path)
+        message = str(caught.exception)
+        self.assertIn("candidate evaluation eval-candidate", message)
+        self.assertIn("context_components missing=[response_order]", message)
+        self.assertIn("unexpected=[unexpected_component]", message)
+        self.assertNotIn("PRIVATE_COMPONENT_IDENTITY", message)
+
+    def test_compact_evaluation_factory_matches_explicit_construction(self) -> None:
+        ownership = {"parser": "context", "aggregation_policy": "evaluator"}
+        direct = example_evaluation("baseline")
+        completed = complete_components(
+            ownership=ownership,
+            evaluator_components=direct.evaluator_components,
+            context_components=direct.context_components,
+            confirm_unlisted_not_applicable=True,
+        )
+        compact = make_evaluation(
+            evaluation_id=direct.evaluation_id,
+            role=direct.role,
+            evaluator_id=direct.evaluator_id,
+            evaluator_version=direct.evaluator_version,
+            evaluator_fingerprint_sha256=direct.evaluator_fingerprint_sha256,
+            context_id=direct.context_id,
+            context_fingerprint_sha256=direct.context_fingerprint_sha256,
+            component_ownership=ownership,
+            components=completed,
+            provenance=direct.provenance,
+        )
+        self.assertEqual(compact.document(ownership), direct.document(ownership))
+        with self.assertRaisesRegex(InputValidationError, "does not match"):
+            make_evaluation(
+                evaluation_id=direct.evaluation_id,
+                role=direct.role,
+                evaluator_id=direct.evaluator_id,
+                evaluator_version=direct.evaluator_version,
+                evaluator_fingerprint_sha256=direct.evaluator_fingerprint_sha256,
+                context_id=direct.context_id,
+                context_fingerprint_sha256=direct.context_fingerprint_sha256,
+                component_ownership={
+                    "parser": "evaluator",
+                    "aggregation_policy": "context",
+                },
+                components=completed,
+                provenance=direct.provenance,
+            )
+
+    def test_compact_contract_matches_direct_normative_contract(self) -> None:
+        direct = {
+            "schema_version": "evaluator-assurance-contract-v1",
+            "contract_id": "compact-contract",
+            "contract_version": "1",
+            "applies_to_input_schema": "evaluator-assurance-input-v1",
+            "rules": [
+                {
+                    "rule_id": "no-new-errors",
+                    "severity": "hard",
+                    "scope": "all_cases",
+                    "scope_id": None,
+                    "metric": "new_status_count",
+                    "operator": "lte",
+                    "threshold": 0,
+                    "parameters": {"status": "error"},
+                    "missing_evidence": "hard_fail",
+                    "rationale": "Reject newly observed source errors.",
+                    "extensions": {},
+                }
+            ],
+            "extensions": {},
+        }
+        compact = Contract(
+            contract_id="compact-contract",
+            contract_version="1",
+            rules=[
+                Rule(
+                    rule_id="no-new-errors",
+                    severity="hard",
+                    scope="all_cases",
+                    scope_id=None,
+                    metric="new_status_count",
+                    operator="lte",
+                    threshold=0,
+                    parameters={"status": "error"},
+                    missing_evidence="hard_fail",
+                    rationale="Reject newly observed source errors.",
+                )
+            ],
+        )
+        self.assertEqual(compact.document(), direct)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact_path = _small_packet(("case-a",)).write(root / "input.jsonl")
+            artifact = load_artifact(artifact_path)
+            contract_path = compact.write(root / "contract.json", artifact=artifact)
+            self.assertEqual(load_contract(contract_path, artifact).document, direct)
+        with self.assertRaisesRegex(InputValidationError, "parameters are invalid"):
+            Rule(
+                rule_id="bad-signature",
+                severity="hard",
+                scope="all_cases",
+                scope_id=None,
+                metric="new_status_count",
+                operator="lte",
+                threshold=0,
+                parameters={},
+                missing_evidence="hard_fail",
+                rationale="No inferred parameter.",
+            ).document()
+        with self.assertRaisesRegex(InputValidationError, "non-empty"):
+            Contract(
+                contract_id="no-policy",
+                contract_version="1",
+                rules=[],
+            ).document()
+
     def test_equivalent_addition_orders_are_byte_identical(self) -> None:
         first = _small_packet(("case-b", "case-a"))
         second = _small_packet(("case-a", "case-b"))
@@ -99,7 +360,9 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             self.assertFalse(target.exists())
         incomplete = example_evaluation("baseline")
         object.__setattr__(incomplete, "context_not_applicable", set())
-        with self.assertRaisesRegex(InputValidationError, "explicitly supply"):
+        with self.assertRaisesRegex(
+            InputValidationError, "context_components inventory is invalid"
+        ):
             incomplete.document({"parser": "context", "aggregation_policy": "evaluator"})
 
     def test_release_examples_are_exact_valid_and_cover_required_concepts(self) -> None:
@@ -172,10 +435,37 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 metadata = json.loads((output / "scaffold.json").read_text())
                 self.assertEqual(metadata["state"], "INERT_REQUIRES_SEMANTIC_CHOICES")
                 self.assertFalse(metadata["contract_emitted"])
+                self.assertEqual(
+                    metadata["component_inventory"]["fixed_evaluator_components"],
+                    sorted(FIXED_EVALUATOR_COMPONENTS),
+                )
+                self.assertEqual(
+                    metadata["component_inventory"]["fixed_context_components"],
+                    sorted(FIXED_CONTEXT_COMPONENTS),
+                )
+                self.assertEqual(
+                    metadata["component_inventory"]["movable_components"],
+                    sorted(MOVABLE_COMPONENTS),
+                )
                 mapping = (output / "producer_mapping.py").read_text()
+                compile(mapping, str(output / "producer_mapping.py"), "exec")
                 self.assertIn("TODO_REQUIRED", mapping)
                 self.assertIn("PARSER_OWNER = None", mapping)
                 self.assertIn("STATUS_MAPPING = None", mapping)
+                self.assertIn("component_requirements(ownership)", mapping)
+                self.assertIn("complete_components(", mapping)
+                self.assertIn('role="baseline"', mapping)
+                self.assertIn('role="candidate"', mapping)
+                self.assertIn("packet.add_case(", mapping)
+                self.assertIn("packet.add_trials(", mapping)
+                readme = (output / "README.md").read_text()
+                self.assertIn("FIXED EVALUATOR COMPONENTS", readme)
+                self.assertIn("FIXED CONTEXT COMPONENTS", readme)
+                self.assertIn("MOVABLE COMPONENTS", readme)
+                self.assertIn("response_order", readme)
+                self.assertIn("sampling_settings", readme)
+                self.assertIn("evalcanary migrate --preflight", readme)
+                self.assertIn("evalcanary migrate --input", readme)
                 self.assertFalse((output / "evaluator-assurance.jsonl").exists())
 
     def test_init_refuses_existing_output(self) -> None:

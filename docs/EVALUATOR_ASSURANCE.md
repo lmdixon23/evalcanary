@@ -83,13 +83,45 @@ status mapping, parser/aggregation ownership, pairing, invariance, context
 exceptions, anchor interpretation, and contract policy. It emits no contract.
 
 `evalcanary.assurance.producer` provides `AssurancePacket`, `Evaluation`,
-`component_value`, `sha256_bytes`, and `sha256_value`. Fingerprints are required
-inputs to `Evaluation`; the two hash helpers act only on exact values passed by
-the caller. The producer never derives identity from names, files, imports,
-objects, environments, package metadata, or time. Finalization orders records,
-fills only explicitly confirmed `not_applicable` inventory slots, computes the
-manifest, runs the normative runtime validator, and only then atomically writes
-the final JSONL artifact.
+`ComponentInventories`, `Rule`, `Contract`, `component_requirements`,
+`complete_components`, `make_evaluation`, `component_value`,
+`sha256_bytes`, and `sha256_value`. Fingerprints remain required explicit
+inputs; the two hash helpers act only on exact values passed by the caller.
+
+The complete locked component vocabulary is:
+
+| Inventory | Required names |
+| --- | --- |
+| FIXED EVALUATOR COMPONENTS | `implementation`, `model_provider`, `rubric_prompt` |
+| FIXED CONTEXT COMPONENTS | `container_image`, `dependency_lock`, `harness_configuration`, `locale_time`, `preprocessing`, `resource_policy`, `response_order`, `runner_adapter`, `runtime`, `sampling_settings`, `task_benchmark` |
+| MOVABLE COMPONENTS | `aggregation_policy`, `parser` |
+
+`parser` and `aggregation_policy` must each be assigned explicitly to
+`evaluator` or `context`. `component_requirements(ownership)` returns the
+deterministically ordered complete names for that exact declaration. It
+inspects no environment and infers neither ownership nor presence.
+
+`complete_components(..., confirm_unlisted_not_applicable=True)` is a bulk
+semantic affirmation: every owned component not explicitly declared
+`present`, `missing`, `intentionally_omitted`, or `not_applicable` is
+affirmed not applicable. The default is false and fails clearly; explicit
+component facts are retained and contradictions are rejected. The result feeds
+`make_evaluation`, whose identity, role, ownership, component, and provenance
+arguments remain explicit.
+
+`Rule` requires metric, scope, scope ID, parameters, severity, operator,
+threshold, missing-evidence policy, and rationale. `Contract` fills only the
+schema binding, empty extensions, stable rule ordering, and atomic output; its
+`write(..., artifact=...)` path validates through the normative contract
+loader. `AssurancePacket.add_cases`, `add_trials`, and `add_anchors` remove
+only loops over already-semantic normalized objects.
+
+The producer never derives identity from names, files, imports, objects,
+environments, package metadata, or time, and it never selects status mappings,
+label polarity, pairing, ownership, invariance, context exceptions, or
+acceptance policy. Finalization orders records, computes the manifest, runs the
+normative runtime validator, and only then atomically writes the final JSONL
+artifact.
 
 ## Input schema
 
