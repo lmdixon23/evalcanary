@@ -72,9 +72,9 @@ def _packet(
     name: str,
     judgment_spec: dict[str, object],
     *,
+    context_differences: list[dict[str, object]],
     baseline: Evaluation | None = None,
     candidate: Evaluation | None = None,
-    context_differences: list[dict[str, object]] | None = None,
 ) -> AssurancePacket:
     return AssurancePacket(
         artifact_id=f"example-{name}",
@@ -87,7 +87,7 @@ def _packet(
         ),
         component_ownership={"parser": "context", "aggregation_policy": "evaluator"},
         provenance={},
-        allowed_context_differences=context_differences or [],
+        allowed_context_differences=context_differences,
     )
 
 
@@ -101,6 +101,7 @@ def categorical_packet() -> AssurancePacket:
             "score_spec": None,
             "repeat_score_tolerance": None,
         },
+        context_differences=[],
     )
     packet.add_critical_group(
         "critical-example",
@@ -132,7 +133,9 @@ def categorical_packet() -> AssurancePacket:
             case_id,
             content_bytes=f"exact-example-content:{case_id}".encode(),
             critical_group_ids=critical,
-            invariance_group_ids={"swap-example"} if case_id.startswith("swap-") else (),
+            invariance_group_ids={"swap-example"}
+            if case_id.startswith("swap-")
+            else (),
         )
         repeat_count = 2 if case_id == "repeat" else 1
         for role in ("baseline", "candidate"):
@@ -153,6 +156,7 @@ def categorical_packet() -> AssurancePacket:
                     pairing_key=f"pair-{order}",
                     status=status,
                     label=trial_label,
+                    score=None,
                     error=error,
                 )
     packet.add_anchor_set(
@@ -212,6 +216,7 @@ def numeric_packet() -> AssurancePacket:
             },
             "repeat_score_tolerance": Decimal("0.25"),
         },
+        context_differences=[],
     )
     packet.add_invariance_group(
         "tolerance-example",
@@ -224,10 +229,14 @@ def numeric_packet() -> AssurancePacket:
         declaration_source="offline-example",
         rationale="The user explicitly supplies the absolute tolerance.",
     )
-    for case_id, score in (("numeric-a", Decimal("7.5")), ("numeric-b", Decimal("7.75"))):
+    for case_id, score in (
+        ("numeric-a", Decimal("7.5")),
+        ("numeric-b", Decimal("7.75")),
+    ):
         packet.add_case(
             case_id,
             content_bytes=f"exact-example-content:{case_id}".encode(),
+            critical_group_ids=(),
             invariance_group_ids={"tolerance-example"},
         )
         for role in ("baseline", "candidate"):
@@ -238,7 +247,9 @@ def numeric_packet() -> AssurancePacket:
                 source_order=0,
                 pairing_key="pair-0",
                 status="determinate",
+                label=None,
                 score=score,
+                error=None,
             )
     return packet
 
@@ -289,7 +300,12 @@ def categorical_numeric_packet() -> AssurancePacket:
             }
         ],
     )
-    packet.add_case("combined", content_bytes=b"exact-example-content:combined")
+    packet.add_case(
+        "combined",
+        content_bytes=b"exact-example-content:combined",
+        critical_group_ids=(),
+        invariance_group_ids=(),
+    )
     for role, score in (("baseline", Decimal("0.6")), ("candidate", Decimal("0.8"))):
         packet.add_trial(
             case_id="combined",
@@ -300,6 +316,7 @@ def categorical_numeric_packet() -> AssurancePacket:
             status="determinate",
             label="pass",
             score=score,
+            error=None,
         )
     return packet
 

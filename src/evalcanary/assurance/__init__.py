@@ -10,9 +10,12 @@ from .producer import (
     Evaluation,
     Rule,
     complete_components,
+    complete_evaluation,
     component_requirements,
     component_value,
     make_evaluation,
+    sha256_bytes,
+    sha256_value,
 )
 from .renderers import write_report_bundle
 from .review_queue import build_review_queue, verify_review_queue_binding
@@ -32,11 +35,14 @@ __all__ = [
     "build_report",
     "build_review_queue",
     "complete_components",
+    "complete_evaluation",
     "component_requirements",
     "component_value",
     "load_artifact",
     "load_contract",
     "make_evaluation",
+    "sha256_bytes",
+    "sha256_value",
     "verify_review_queue_binding",
     "write_report_bundle",
 ]

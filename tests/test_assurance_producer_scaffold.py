@@ -13,6 +13,15 @@ from pathlib import Path
 
 from scripts.generate_assurance_examples import example_evaluation, example_packets
 
+from evalcanary.assurance import (
+    complete_evaluation as public_complete_evaluation,
+)
+from evalcanary.assurance import (
+    sha256_bytes as public_sha256_bytes,
+)
+from evalcanary.assurance import (
+    sha256_value as public_sha256_value,
+)
 from evalcanary.assurance.constants import (
     FIXED_CONTEXT_COMPONENTS,
     FIXED_EVALUATOR_COMPONENTS,
@@ -24,6 +33,7 @@ from evalcanary.assurance.producer import (
     Contract,
     Rule,
     complete_components,
+    complete_evaluation,
     component_requirements,
     component_value,
     make_evaluation,
@@ -44,7 +54,9 @@ EXAMPLE_ROOT = (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _small_packet(case_order: tuple[str, ...]) -> AssurancePacket:
+def _small_packet(
+    case_order: tuple[str, ...], *, pairing_key: str | None = "pair-0"
+) -> AssurancePacket:
     packet = AssurancePacket(
         artifact_id="deterministic-example",
         corpus_id="deterministic-corpus",
@@ -59,9 +71,15 @@ def _small_packet(case_order: tuple[str, ...]) -> AssurancePacket:
         evaluations=[example_evaluation("candidate"), example_evaluation("baseline")],
         component_ownership={"aggregation_policy": "evaluator", "parser": "context"},
         provenance={},
+        allowed_context_differences=[],
     )
     for case_id in case_order:
-        packet.add_case(case_id, content_bytes=f"content:{case_id}".encode())
+        packet.add_case(
+            case_id,
+            content_bytes=f"content:{case_id}".encode(),
+            critical_group_ids=(),
+            invariance_group_ids=(),
+        )
     for case_id in reversed(case_order):
         for role in ("candidate", "baseline"):
             packet.add_trial(
@@ -69,9 +87,11 @@ def _small_packet(case_order: tuple[str, ...]) -> AssurancePacket:
                 evaluation_id=f"eval-{role}",
                 trial_id=f"{case_id}-{role}",
                 source_order=0,
-                pairing_key="pair-0",
+                pairing_key=pairing_key,
                 status="determinate",
                 label="pass",
+                score=None,
+                error=None,
             )
     return packet
 
@@ -97,10 +117,90 @@ def _small_contract() -> Contract:
     )
 
 
+def _completed_scaffold_choices() -> dict[str, object]:
+    ownership = {"parser": "context", "aggregation_policy": "evaluator"}
+    evaluations = {}
+    for role in ("baseline", "candidate"):
+        evaluations[role] = {
+            "evaluation_id": f"eval-{role}",
+            "evaluator_id": f"evaluator-{role}",
+            "evaluator_version": "1",
+            "evaluator_fingerprint_sha256": sha256_bytes(f"evaluator-{role}".encode()),
+            "context_id": "shared-context",
+            "context_fingerprint_sha256": sha256_bytes(b"shared-context"),
+            "component_values": {
+                "implementation": component_value(
+                    "present", identity=f"implementation-{role}"
+                ),
+                "aggregation_policy": component_value(
+                    "present", identity="aggregation-v1"
+                ),
+                "parser": component_value("present", identity="parser-v1"),
+            },
+            "confirm_unlisted_not_applicable": True,
+            "provenance": {},
+        }
+    trial_source = [
+        {
+            "case_id": "case-a",
+            "role": role,
+            "trial_id": f"case-a-{role}",
+            "source_order": 0,
+            "mapped_pairing_key": "pair-a",
+            "mapped_status": "determinate",
+            "mapped_label": "pass",
+            "mapped_score": None,
+            "mapped_error": None,
+        }
+        for role in ("baseline", "candidate")
+    ]
+
+    def status_mapping(source):
+        return {
+            "status": source["mapped_status"],
+            "label": source["mapped_label"],
+            "score": source["mapped_score"],
+            "error": source["mapped_error"],
+        }
+
+    def pairing_policy(source):
+        return source["mapped_pairing_key"]
+
+    return {
+        "COMPONENT_OWNERSHIP": ownership,
+        "ALLOWED_CONTEXT_DIFFERENCES": [],
+        "PACKET": {
+            "artifact_id": "completed-scaffold",
+            "corpus_id": "completed-corpus",
+            "identity_level": "content_hashes",
+            "judgment_spec_id": "completed-labels-v1",
+            "provenance": {},
+        },
+        "EVALUATIONS": evaluations,
+        "CASES": [
+            {
+                "case_id": "case-a",
+                "content_bytes": b"case-a",
+                "critical_group_ids": [],
+                "invariance_group_ids": [],
+            }
+        ],
+        "TRIAL_SOURCE": trial_source,
+        "STATUS_MAPPING": status_mapping,
+        "PAIRING_POLICY": pairing_policy,
+        "CRITICAL_GROUPS": [],
+        "INVARIANCE_GROUPS": [],
+        "ANCHOR_SETS": [],
+        "ANCHORS": [],
+    }
+
+
 class AssuranceProducerScaffoldTests(unittest.TestCase):
     def test_exact_hash_helpers_and_explicit_component_values(self) -> None:
         self.assertEqual(sha256_value({"b": 2, "a": 1}), sha256_value({"a": 1, "b": 2}))
         self.assertNotEqual(sha256_bytes(b"exact-a"), sha256_bytes(b"exact-b"))
+        self.assertIs(public_sha256_bytes, sha256_bytes)
+        self.assertIs(public_sha256_value, sha256_value)
         self.assertEqual(
             component_value("present", identity="caller-supplied"),
             {"presence": "present", "identity": "caller-supplied", "sha256": None},
@@ -134,6 +234,93 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         self.assertEqual(set(MOVABLE_COMPONENTS), {"parser", "aggregation_policy"})
         with self.assertRaisesRegex(InputValidationError, r"missing=\[parser\]"):
             component_requirements({"aggregation_policy": "evaluator"})
+
+    def test_public_guide_eliminates_the_three_mechanical_ambiguities(self) -> None:
+        guide = (PROJECT_ROOT / "docs" / "EVALUATOR_ASSURANCE.md").read_text()
+        self.assertIn(
+            "from evalcanary.assurance import sha256_bytes, sha256_value", guide
+        )
+        self.assertNotIn(
+            "from evalcanary.assurance.producer import sha256_bytes", guide
+        )
+        self.assertIn('critical_group_ids=["release-blockers"]', guide)
+        self.assertIn('invariance_group_ids=["paraphrase-pair"]', guide)
+        self.assertIn("There is no\n`assign_case_groups` API", guide)
+
+    def test_semantic_empty_choices_must_be_explicit_but_remain_available(
+        self,
+    ) -> None:
+        evaluation_args = {
+            "artifact_id": "missing-context-choice",
+            "corpus_id": "corpus",
+            "identity_level": "content_hashes",
+            "judgment_spec": {
+                "judgment_spec_id": "labels-v1",
+                "kind": "categorical",
+                "label_space": ["pass", "fail"],
+                "score_spec": None,
+                "repeat_score_tolerance": None,
+            },
+            "evaluations": [
+                example_evaluation("baseline"),
+                example_evaluation("candidate"),
+            ],
+            "component_ownership": {
+                "aggregation_policy": "evaluator",
+                "parser": "context",
+            },
+            "provenance": {},
+        }
+        with self.assertRaisesRegex(TypeError, "allowed_context_differences"):
+            AssurancePacket(**evaluation_args)
+
+        packet = _small_packet(("case-a",))
+        with self.assertRaisesRegex(TypeError, "pairing_key"):
+            packet.add_trial(
+                case_id="case-a",
+                evaluation_id="eval-baseline",
+                trial_id="omitted-pairing",
+                source_order=1,
+                status="determinate",
+                label="pass",
+                score=None,
+                error=None,
+            )
+        with self.assertRaisesRegex(TypeError, "label"):
+            packet.add_trial(
+                case_id="case-a",
+                evaluation_id="eval-baseline",
+                trial_id="omitted-label",
+                source_order=1,
+                status="determinate",
+                pairing_key="pair-1",
+                score=None,
+                error=None,
+            )
+        with self.assertRaisesRegex(TypeError, "error"):
+            packet.add_trial(
+                case_id="case-a",
+                evaluation_id="eval-baseline",
+                trial_id="omitted-error-applicability",
+                source_order=1,
+                status="determinate",
+                pairing_key="pair-1",
+                label="pass",
+                score=None,
+            )
+        with self.assertRaisesRegex(TypeError, "critical_group_ids"):
+            packet.add_case(
+                "case-b",
+                content_bytes=b"case-b",
+                invariance_group_ids=(),
+            )
+
+        explicitly_empty = _small_packet(("case-a",), pairing_key=None)
+        explicitly_empty.canonical_bytes()
+        records = explicitly_empty.canonical_records()
+        self.assertEqual(records[0]["allowed_context_differences"], [])
+        trials = [record for record in records if record["record_type"] == "trial"]
+        self.assertTrue(all(trial["pairing_key"] is None for trial in trials))
 
     def test_bulk_not_applicable_is_explicit_and_preserves_overrides(self) -> None:
         ownership = {"parser": "context", "aggregation_policy": "evaluator"}
@@ -200,9 +387,7 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 "implementation": component_value(
                     "present", identity="PRIVATE_COMPONENT_IDENTITY"
                 ),
-                "unexpected_component": component_value(
-                    "present", sha256="1" * 64
-                ),
+                "unexpected_component": component_value("present", sha256="1" * 64),
             },
         )
         object.__setattr__(
@@ -221,9 +406,7 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             "missing=[aggregation_policy, model_provider, rubric_prompt]", message
         )
         self.assertIn("unexpected=[unexpected_component]", message)
-        self.assertIn(
-            "duplicate_supplied_or_not_applicable=[implementation]", message
-        )
+        self.assertIn("duplicate_supplied_or_not_applicable=[implementation]", message)
         self.assertNotIn("PRIVATE_COMPONENT_IDENTITY", message)
         self.assertNotIn("111111", message)
 
@@ -285,6 +468,45 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                     "aggregation_policy": "context",
                 },
                 components=completed,
+                provenance=direct.provenance,
+            )
+
+    def test_flat_component_evaluation_is_explicit_and_byte_equivalent(self) -> None:
+        ownership = {"parser": "context", "aggregation_policy": "evaluator"}
+        direct = example_evaluation("baseline")
+        component_values = {
+            **direct.evaluator_components,
+            **direct.context_components,
+        }
+        compact = complete_evaluation(
+            evaluation_id=direct.evaluation_id,
+            role=direct.role,
+            evaluator_id=direct.evaluator_id,
+            evaluator_version=direct.evaluator_version,
+            evaluator_fingerprint_sha256=direct.evaluator_fingerprint_sha256,
+            context_id=direct.context_id,
+            context_fingerprint_sha256=direct.context_fingerprint_sha256,
+            component_ownership=ownership,
+            component_values=component_values,
+            confirm_unlisted_not_applicable=True,
+            provenance=direct.provenance,
+        )
+        self.assertIs(public_complete_evaluation, complete_evaluation)
+        self.assertEqual(compact.document(ownership), direct.document(ownership))
+        with self.assertRaisesRegex(
+            InputValidationError, "confirm_unlisted_not_applicable=True"
+        ):
+            complete_evaluation(
+                evaluation_id=direct.evaluation_id,
+                role=direct.role,
+                evaluator_id=direct.evaluator_id,
+                evaluator_version=direct.evaluator_version,
+                evaluator_fingerprint_sha256=direct.evaluator_fingerprint_sha256,
+                context_id=direct.context_id,
+                context_fingerprint_sha256=direct.context_fingerprint_sha256,
+                component_ownership=ownership,
+                component_values=component_values,
+                confirm_unlisted_not_applicable=False,
                 provenance=direct.provenance,
             )
 
@@ -401,9 +623,7 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         )
         with self.assertRaises(TypeError):
             evaluation_ids["baseline"] = "mutated"
-        self.assertEqual(
-            packet.evaluation_ids_by_role["baseline"], "eval-baseline"
-        )
+        self.assertEqual(packet.evaluation_ids_by_role["baseline"], "eval-baseline")
 
     def test_authoring_bridge_adds_no_mandatory_runtime_dependency(self) -> None:
         project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
@@ -414,7 +634,9 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         second = _small_packet(("case-a", "case-b"))
         self.assertEqual(first.canonical_bytes(), second.canonical_bytes())
 
-    def test_atomic_write_uses_normative_validator_and_retains_explicit_identity(self) -> None:
+    def test_atomic_write_uses_normative_validator_and_retains_explicit_identity(
+        self,
+    ) -> None:
         packet = _small_packet(("case-a", "case-b"))
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "nested" / "assurance.jsonl"
@@ -426,7 +648,9 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             sha256_bytes(b"exact-example-evaluator-baseline"),
         )
 
-    def test_invalid_references_and_inventories_fail_before_final_artifact(self) -> None:
+    def test_invalid_references_and_inventories_fail_before_final_artifact(
+        self,
+    ) -> None:
         packet = _small_packet(("case-a",))
         packet._cases[0]["invariance_group_ids"] = ["undeclared-group"]
         with tempfile.TemporaryDirectory() as temp:
@@ -439,7 +663,9 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         with self.assertRaisesRegex(
             InputValidationError, "context_components inventory is invalid"
         ):
-            incomplete.document({"parser": "context", "aggregation_policy": "evaluator"})
+            incomplete.document(
+                {"parser": "context", "aggregation_policy": "evaluator"}
+            )
 
     def test_release_examples_are_exact_valid_and_cover_required_concepts(self) -> None:
         generated = example_packets()
@@ -454,7 +680,9 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             artifacts[filename] = load_artifact(path)
         categorical = artifacts["categorical.jsonl"]
         statuses = {trial["status"] for trial in categorical.trials}
-        self.assertTrue({"determinate", "abstain", "indeterminate", "error"} <= statuses)
+        self.assertTrue(
+            {"determinate", "abstain", "indeterminate", "error"} <= statuses
+        )
         self.assertGreater(len(categorical.trials), len(categorical.cases) * 2)
         self.assertIn(
             "swapped_preference",
@@ -525,14 +753,18 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 )
                 mapping = (output / "producer_mapping.py").read_text()
                 compile(mapping, str(output / "producer_mapping.py"), "exec")
-                self.assertIn("TODO_REQUIRED", mapping)
-                self.assertIn("PARSER_OWNER = None", mapping)
-                self.assertIn("STATUS_MAPPING = None", mapping)
+                self.assertIn("AUTHORING_INCOMPLETE", mapping)
+                self.assertIn("class _UnresolvedChoice", mapping)
+                self.assertIn("COMPONENT_OWNERSHIP = unresolved", mapping)
+                self.assertIn("ALLOWED_CONTEXT_DIFFERENCES = unresolved", mapping)
+                self.assertIn("CASES = unresolved", mapping)
+                self.assertIn("TRIAL_SOURCE = unresolved", mapping)
+                self.assertIn("def STATUS_MAPPING(", mapping)
+                self.assertIn("def PAIRING_POLICY(", mapping)
                 self.assertIn("component_requirements(ownership)", mapping)
-                self.assertIn("complete_components(", mapping)
-                self.assertIn('role="baseline"', mapping)
-                self.assertIn('role="candidate"', mapping)
-                self.assertIn("packet.add_case(", mapping)
+                self.assertIn("complete_evaluation(", mapping)
+                self.assertIn('("baseline", "candidate")', mapping)
+                self.assertIn("packet.add_cases(CASES)", mapping)
                 self.assertIn("packet.add_trials(", mapping)
                 self.assertIn("packet.evaluation_ids_by_role", mapping)
                 self.assertIn("def write_outputs(", mapping)
@@ -549,11 +781,338 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                     "never determines\nwhether component identities should change",
                     readme,
                 )
-                self.assertIn("contract.write(contract_path, artifact=input_path)", readme)
+                self.assertIn("substantive semantic choice is true or", readme)
+                self.assertIn("There is no\n`assign_case_groups` method", readme)
+                self.assertIn(
+                    "contract.write(contract_path, artifact=input_path)", readme
+                )
                 self.assertIn("explicit keyword-only `Rule`", readme)
                 self.assertIn("evalcanary migrate --preflight", readme)
                 self.assertIn("evalcanary migrate --input", readme)
                 self.assertFalse((output / "evaluator-assurance.jsonl").exists())
+
+    def test_scaffold_guard_rejects_every_unresolved_semantic_class(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            scaffold = Path(temp) / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping = (scaffold / "producer_mapping.py").read_text()
+            namespace: dict[str, object] = {"__name__": "guard_under_test"}
+            exec(
+                compile(mapping, str(scaffold / "producer_mapping.py"), "exec"),
+                namespace,
+            )
+            unresolved = namespace["unresolved"]
+            paths = (
+                ("artifact identity", ("PACKET", "artifact_id")),
+                ("corpus identity", ("PACKET", "corpus_id")),
+                ("judgment identity", ("PACKET", "judgment_spec_id")),
+                (
+                    "evaluation identity",
+                    ("EVALUATIONS", "baseline", "evaluation_id"),
+                ),
+                ("evaluator identity", ("EVALUATIONS", "baseline", "evaluator_id")),
+                (
+                    "evaluator version",
+                    ("EVALUATIONS", "baseline", "evaluator_version"),
+                ),
+                (
+                    "evaluator fingerprint",
+                    (
+                        "EVALUATIONS",
+                        "baseline",
+                        "evaluator_fingerprint_sha256",
+                    ),
+                ),
+                ("context identity", ("EVALUATIONS", "baseline", "context_id")),
+                (
+                    "context fingerprint",
+                    ("EVALUATIONS", "baseline", "context_fingerprint_sha256"),
+                ),
+                (
+                    "component identity",
+                    (
+                        "EVALUATIONS",
+                        "baseline",
+                        "component_values",
+                        "implementation",
+                        "identity",
+                    ),
+                ),
+                ("parser ownership", ("COMPONENT_OWNERSHIP", "parser")),
+                (
+                    "aggregation ownership",
+                    ("COMPONENT_OWNERSHIP", "aggregation_policy"),
+                ),
+                ("case identity", ("CASES", 0, "case_id")),
+                ("case content", ("CASES", 0, "content_bytes")),
+                ("critical group decision", ("CASES", 0, "critical_group_ids")),
+                (
+                    "case invariance decision",
+                    ("CASES", 0, "invariance_group_ids"),
+                ),
+                ("trial case identity", ("TRIAL_SOURCE", 0, "case_id")),
+                (
+                    "trial pairing mapping",
+                    ("TRIAL_SOURCE", 0, "mapped_pairing_key"),
+                ),
+                ("trial status mapping", ("TRIAL_SOURCE", 0, "mapped_status")),
+                ("trial label mapping", ("TRIAL_SOURCE", 0, "mapped_label")),
+                ("trial score mapping", ("TRIAL_SOURCE", 0, "mapped_score")),
+                ("trial error mapping", ("TRIAL_SOURCE", 0, "mapped_error")),
+                ("context differences", ("ALLOWED_CONTEXT_DIFFERENCES",)),
+                ("critical groups", ("CRITICAL_GROUPS",)),
+                ("invariance relations", ("INVARIANCE_GROUPS",)),
+                ("anchor-set interpretation", ("ANCHOR_SETS",)),
+                ("anchor declarations", ("ANCHORS",)),
+            )
+            for name, path in paths:
+                with self.subTest(name=name):
+                    choices = _completed_scaffold_choices()
+                    cursor = choices
+                    for key in path[:-1]:
+                        cursor = cursor[key]
+                    cursor[path[-1]] = unresolved(f"still unresolved: {name}")
+                    namespace.update(choices)
+                    with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                        namespace["build_packet"]()
+
+            explicit_empty = _completed_scaffold_choices()
+            for trial in explicit_empty["TRIAL_SOURCE"]:
+                trial["mapped_pairing_key"] = None
+            namespace.update(explicit_empty)
+            namespace["build_packet"]().canonical_bytes()
+
+    def test_status_and_pairing_mappings_causally_control_trial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            scaffold = Path(temp) / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping_path = scaffold / "producer_mapping.py"
+            namespace: dict[str, object] = {"__name__": "binding_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            choices = _completed_scaffold_choices()
+            baseline, candidate = choices["TRIAL_SOURCE"]
+            baseline.update(
+                mapped_status="abstain",
+                mapped_label=None,
+                mapped_score=None,
+                mapped_error=None,
+            )
+            candidate["mapped_pairing_key"] = None
+            namespace.update(choices)
+            trials = {
+                record["trial_id"]: record
+                for record in namespace["build_packet"]().canonical_records()
+                if record["record_type"] == "trial"
+            }
+            self.assertEqual(trials["case-a-baseline"]["status"], "abstain")
+            self.assertIsNone(trials["case-a-baseline"]["label"])
+            self.assertIsNone(trials["case-a-baseline"]["error"])
+            self.assertIsNone(trials["case-a-candidate"]["pairing_key"])
+
+    def test_scaffold_rejects_placeholder_tokens_digests_and_mapping_stubs(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            scaffold = Path(temp) / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping_path = scaffold / "producer_mapping.py"
+            namespace: dict[str, object] = {"__name__": "placeholder_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            artifact_marker = namespace["PACKET"]["artifact_id"]
+            fingerprint_marker = namespace["EVALUATIONS"]["baseline"][
+                "evaluator_fingerprint_sha256"
+            ]
+
+            todo_identity = _completed_scaffold_choices()
+            todo_identity["PACKET"]["artifact_id"] = artifact_marker.token
+            namespace.update(todo_identity)
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+            todo_fingerprint = _completed_scaffold_choices()
+            todo_fingerprint["EVALUATIONS"]["baseline"][
+                "evaluator_fingerprint_sha256"
+            ] = sha256_bytes(fingerprint_marker.token.encode("utf-8"))
+            namespace.update(todo_fingerprint)
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+            non_callable = _completed_scaffold_choices()
+            non_callable["STATUS_MAPPING"] = "reviewed"
+            namespace.update(non_callable)
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+            def not_implemented(source):
+                del source
+                raise RuntimeError("AUTHORING_INCOMPLETE: mapping not implemented")
+
+            callable_stub = _completed_scaffold_choices()
+            callable_stub["PAIRING_POLICY"] = not_implemented
+            namespace.update(callable_stub)
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+            incomplete_fields = _completed_scaffold_choices()
+            incomplete_fields["STATUS_MAPPING"] = lambda source: {
+                "status": source["mapped_status"],
+                "label": source["mapped_label"],
+                "score": source["mapped_score"],
+            }
+            namespace.update(incomplete_fields)
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+    def test_superficial_scaffold_sentinel_renaming_does_not_bypass_guard(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            scaffold = Path(temp) / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping_path = scaffold / "producer_mapping.py"
+            renamed = (
+                mapping_path.read_text()
+                .replace("_UnresolvedChoice", "_PendingChoice")
+                .replace("unresolved", "pending")
+            )
+            namespace: dict[str, object] = {"__name__": "renamed_guard_under_test"}
+            exec(compile(renamed, str(mapping_path), "exec"), namespace)
+            namespace.update(
+                SEMANTIC_CHOICES_REVIEWED=True,
+                STATUS_MAPPING_REVIEWED=True,
+                PAIRING_POLICY_REVIEWED=True,
+            )
+            with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                namespace["build_packet"]()
+
+    def test_repeated_authoring_uses_zero_new_mapping_logic_without_identity_drift(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            scaffold = Path(temp) / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping_path = scaffold / "producer_mapping.py"
+            namespace: dict[str, object] = {"__name__": "repeat_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            first_choices = _completed_scaffold_choices()
+            namespace.update(first_choices)
+            build_packet = namespace["build_packet"]
+            first = build_packet()
+
+            second_choices = deepcopy(first_choices)
+            second_choices["PACKET"]["artifact_id"] = "completed-scaffold-u2"
+            candidate = second_choices["EVALUATIONS"]["candidate"]
+            candidate["evaluation_id"] = "eval-candidate-u2"
+            candidate["evaluator_version"] = "2"
+            candidate["evaluator_fingerprint_sha256"] = sha256_bytes(
+                b"evaluator-candidate-u2"
+            )
+            namespace.update(second_choices)
+            second = build_packet()
+
+            first_records = first.canonical_records()
+            second_records = second.canonical_records()
+            first_evaluations = {
+                item["role"]: item for item in first_records[0]["evaluations"]
+            }
+            second_evaluations = {
+                item["role"]: item for item in second_records[0]["evaluations"]
+            }
+            self.assertEqual(
+                first_evaluations["baseline"], second_evaluations["baseline"]
+            )
+            first_candidate = deepcopy(first_evaluations["candidate"])
+            second_candidate = deepcopy(second_evaluations["candidate"])
+            for field in (
+                "evaluation_id",
+                "evaluator_version",
+                "evaluator_fingerprint_sha256",
+            ):
+                first_candidate.pop(field)
+                second_candidate.pop(field)
+            self.assertEqual(first_candidate, second_candidate)
+            self.assertIs(build_packet, namespace["build_packet"])
 
     def test_scaffold_executes_the_documented_golden_authoring_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -577,18 +1136,10 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             )
             mapping_path = scaffold / "producer_mapping.py"
             namespace: dict[str, object] = {"__name__": "scaffold_under_test"}
-            exec(compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace)
-            namespace.update(
-                {
-                    "PARSER_OWNER": "context",
-                    "AGGREGATION_POLICY_OWNER": "evaluator",
-                    "STATUS_MAPPING": {"pass": "determinate", "fail": "determinate"},
-                    "PAIRING_POLICY": "explicit-pairing-key",
-                    "CONTEXT_DIFFERENCES": [],
-                    "ANCHOR_INTERPRETATION": "no-anchors-in-synthetic-example",
-                    "CONFIRM_UNLISTED_NOT_APPLICABLE": True,
-                }
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
             )
+            namespace.update(_completed_scaffold_choices())
             input_path, contract_path = namespace["write_outputs"](
                 contract=_small_contract(),
                 input_path=root / "evaluator-assurance.jsonl",

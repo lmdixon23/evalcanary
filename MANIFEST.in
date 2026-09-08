@@ -1,4 +1,5 @@
 include tests/assurance_helpers.py
+include docs/EVALUATOR_ASSURANCE.md
 include tests/test_action_runner.py
 include tests/test_assurance_cases.py
 include tests/test_assurance_engine_contract.py

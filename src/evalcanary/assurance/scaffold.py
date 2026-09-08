@@ -56,9 +56,7 @@ def _readme(judgment: str, labels: list[str]) -> str:
     context_components = "\n".join(
         f"- `{item}`" for item in sorted(FIXED_CONTEXT_COMPONENTS)
     )
-    movable_components = "\n".join(
-        f"- `{item}`" for item in sorted(MOVABLE_COMPONENTS)
-    )
+    movable_components = "\n".join(f"- `{item}`" for item in sorted(MOVABLE_COMPONENTS))
     return f"""# EvalCanary evaluator-assurance scaffold
 
 This inert scaffold records only the choices supplied to `evalcanary init`.
@@ -97,17 +95,53 @@ it performs no environment inspection and infers neither ownership nor
 presence.
 
 Evaluator and context fingerprints must be supplied explicitly, or computed by
-calling `sha256_bytes`/`sha256_value` over exact local values. Do not derive
-them from display names, filenames, paths, imports, object representations,
-package metadata, the environment, or the clock.
+calling `sha256_bytes`/`sha256_value` over exact local values. Their single
+canonical public import is `from evalcanary.assurance import sha256_bytes,
+sha256_value`. Do not derive fingerprints from display names, filenames, paths,
+imports, object representations, package metadata, the environment, or the
+clock.
 
 ## MECHANICAL REPRESENTATION
 
-Edit `producer_mapping.py`. It contains one compact baseline/candidate/case/
-trial mapping with obvious synthetic placeholders, an optional group extension
-point, and `write_outputs(contract=...)`. Its guard intentionally prevents
-output until all TODO choices and the bulk not-applicable affirmation are
-resolved.
+Edit `producer_mapping.py`. Every unresolved declaration is a typed marker,
+including identities, ownership, component facts, context differences, cases,
+local trial rows, groups, and anchors. Scaffold-specific sentinel text, bytes,
+and their fingerprint digests are also blocked. Renaming marker descriptions
+cannot resolve them. The structural guard blocks output while any marker
+remains; the normative validator then checks the completed packet. Neither
+check establishes that an author's substantive semantic choice is true or
+correct.
+
+Implement `STATUS_MAPPING(source)` so its exact `status`, `label`, `score`, and
+`error` result controls each emitted trial. Implement `PAIRING_POLICY(source)`
+so its exact string or explicit `None` controls the emitted pairing key. These
+functions map only the local rows you supply in `TRIAL_SOURCE`; the scaffold
+does not inspect or infer arbitrary external source semantics. Both default
+implementations fail with `AUTHORING_INCOMPLETE`.
+
+An empty semantic choice must be affirmative: replace the corresponding marker
+with `[]`, `{{}}`, or `None` only where the field permits that exact value. For
+example, `ALLOWED_CONTEXT_DIFFERENCES = []` explicitly asserts that no context
+difference is allowed, and returning `None` from `PAIRING_POLICY` explicitly
+asserts that the trial is unpaired. Omitting either public argument is rejected.
+`INVARIANCE_GROUPS = []` selects no invariance relations; otherwise its exact
+group declarations control output. `ANCHOR_SETS = []` and `ANCHORS = []` select
+no human anchors; otherwise the supplied interpretation, aggregation, and
+clustering declarations control output.
+
+Case/group membership has one supported mechanism. Supply both collections on
+the case declaration passed to `packet.add_case(...)` or `packet.add_cases(...)`:
+
+```python
+{{
+    "case_id": "case-a",
+    "critical_group_ids": ["release-blockers"],
+    "invariance_group_ids": ["paraphrase-pair"],
+}}
+```
+
+Declare the matching group records separately. There is no
+`assign_case_groups` method and no later group-assignment phase.
 
 The complete authoring path is:
 
@@ -177,179 +211,233 @@ acceptance threshold, severity, or missing-evidence policy.
 
 def _mapping(judgment: str, labels: list[str]) -> str:
     labels_literal = repr(labels if labels else None)
-    score_todo = (
+    score_choice = (
         "None"
         if judgment == "categorical"
-        else "TODO_SCORE_SPEC  # exact scale/domain/direction/status choices required"
+        else 'unresolved("exact score specification")'
     )
-    example_label = "None" if judgment == "numeric" else "LABEL_SPACE[0]"
-    example_score = "None" if judgment == "categorical" else 'Decimal("0.5")'
-    score_guard = (
-        ""
+    tolerance_choice = (
+        "None"
         if judgment == "categorical"
-        else '\n    if TODO_SCORE_SPEC is None:\n'
-        '        raise RuntimeError("TODO_REQUIRED: supply the exact score specification")'
+        else 'unresolved("repeat-score tolerance; use None to affirm no tolerance")'
     )
-    return f'''"""Complete these explicit choices before producing an artifact."""
+    template = '''"""Supply every explicit declaration before producing an artifact."""
 
-from decimal import Decimal
+from __future__ import annotations
+
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from evalcanary.assurance import (
     AssurancePacket,
     Contract,
-    complete_components,
+    complete_evaluation,
     component_requirements,
     component_value,
-    make_evaluation,
+    sha256_bytes,
+    sha256_value,
 )
-from evalcanary.assurance.producer import sha256_bytes
-
-JUDGMENT_KIND = {judgment!r}
-LABEL_SPACE = {labels_literal}
-TODO_SCORE_SPEC = None
-
-# Required semantic decisions. Keep these unresolved until a human supplies them.
-PARSER_OWNER = None
-AGGREGATION_POLICY_OWNER = None
-STATUS_MAPPING = None
-PAIRING_POLICY = None
-CONTEXT_DIFFERENCES = None
-ANCHOR_INTERPRETATION = None
-CONFIRM_UNLISTED_NOT_APPLICABLE = False
 
 
-def components_for(role: str, ownership: dict[str, str]):
-    # These are synthetic placeholders, not inferred identities or presence.
-    # Explicit missing/omitted/present/not_applicable declarations override
-    # the bulk confirmation for the named component.
-    return complete_components(
-        ownership=ownership,
-        evaluator_components={{
-            "implementation": component_value(
-                "present", identity=f"TODO_{{role}}_implementation"
-            ),
-            "model_provider": component_value("intentionally_omitted"),
-            "rubric_prompt": component_value("missing"),
-        }},
-        context_components={{
-            "runner_adapter": component_value(
-                "present", identity="TODO_SHARED_RUNNER_ADAPTER"
-            ),
-        }},
-        confirm_unlisted_not_applicable=CONFIRM_UNLISTED_NOT_APPLICABLE,
+_SCAFFOLD_SENTINEL_PREFIX = "TODO_EVALCANARY_SCAFFOLD:"
+_SCAFFOLD_SENTINEL_TEXTS: set[str] = set()
+_SCAFFOLD_SENTINEL_BYTES: set[bytes] = set()
+_SCAFFOLD_SENTINEL_DIGESTS: set[str] = set()
+
+
+class _UnresolvedChoice:
+    """Typed marker: editing its description cannot turn it into a decision."""
+
+    def __init__(self, description: str) -> None:
+        self.description = description
+        self.token = _SCAFFOLD_SENTINEL_PREFIX + description
+        _SCAFFOLD_SENTINEL_TEXTS.add(self.token)
+        _SCAFFOLD_SENTINEL_BYTES.add(self.token.encode("utf-8"))
+        _SCAFFOLD_SENTINEL_DIGESTS.add(sha256_bytes(self.token.encode("utf-8")))
+
+
+def unresolved(description: str) -> _UnresolvedChoice:
+    return _UnresolvedChoice(description)
+
+
+def _unresolved_paths(value: Any, path: str) -> list[str]:
+    if isinstance(value, _UnresolvedChoice):
+        return [path]
+    if isinstance(value, str) and value in (
+        _SCAFFOLD_SENTINEL_TEXTS | _SCAFFOLD_SENTINEL_DIGESTS
+    ):
+        return [path]
+    if isinstance(value, bytes) and value in _SCAFFOLD_SENTINEL_BYTES:
+        return [path]
+    if isinstance(value, Mapping):
+        return [
+            nested
+            for key in sorted(value, key=str)
+            for nested in _unresolved_paths(value[key], f"{path}.{key}")
+        ]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [
+            nested
+            for index, item in enumerate(value)
+            for nested in _unresolved_paths(item, f"{path}[{index}]")
+        ]
+    return []
+
+
+def require_structural_completion(**choices: Any) -> None:
+    missing = _unresolved_paths(choices, "authoring")
+    if missing:
+        raise RuntimeError(
+            "AUTHORING_INCOMPLETE: explicit declarations remain at " + ", ".join(missing)
+        )
+
+
+JUDGMENT_KIND = __JUDGMENT_KIND__
+LABEL_SPACE = __LABEL_SPACE__
+SCORE_SPEC = __SCORE_SPEC__
+REPEAT_SCORE_TOLERANCE = __REPEAT_SCORE_TOLERANCE__
+
+# Replace each marker with reviewed data. Empty lists/dicts and None are accepted
+# when they are supplied deliberately and are structurally valid for that field.
+COMPONENT_OWNERSHIP = unresolved("parser and aggregation-policy owners")
+ALLOWED_CONTEXT_DIFFERENCES = unresolved("exact differences; use [] to affirm none")
+PACKET = {
+    "artifact_id": unresolved("artifact identity"),
+    "corpus_id": unresolved("corpus identity"),
+    "identity_level": unresolved("case_ids or content_hashes"),
+    "judgment_spec_id": unresolved("judgment-spec identity"),
+    "provenance": unresolved("packet provenance; use {} to affirm none"),
+}
+EVALUATIONS = {
+    role: {
+        "evaluation_id": unresolved(f"{role} evaluation identity"),
+        "evaluator_id": unresolved(f"{role} evaluator identity"),
+        "evaluator_version": unresolved(f"{role} evaluator version"),
+        "evaluator_fingerprint_sha256": unresolved(f"{role} evaluator fingerprint"),
+        "context_id": unresolved(f"{role} context identity"),
+        "context_fingerprint_sha256": unresolved(f"{role} context fingerprint"),
+        "component_values": unresolved(f"{role} component facts keyed by name"),
+        "confirm_unlisted_not_applicable": unresolved(
+            f"{role} explicit bulk not-applicable affirmation"
+        ),
+        "provenance": unresolved(f"{role} provenance; use {{}} to affirm none"),
+    }
+    for role in ("baseline", "candidate")
+}
+CASES = unresolved(
+    "case declarations with explicit critical_group_ids and invariance_group_ids"
+)
+TRIAL_SOURCE = unresolved(
+    "local trial rows whose status/error and pairing are mapped explicitly below"
+)
+CRITICAL_GROUPS = unresolved("critical-group declarations; use [] to affirm none")
+INVARIANCE_GROUPS = unresolved("invariance declarations; use [] to affirm none")
+ANCHOR_SETS = unresolved("anchor-set declarations; use [] to affirm none")
+ANCHORS = unresolved("anchor declarations; use [] to affirm none")
+
+
+def STATUS_MAPPING(source: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return exactly status, label, score, and error for one local source row."""
+
+    del source
+    raise RuntimeError("AUTHORING_INCOMPLETE: implement STATUS_MAPPING")
+
+
+def PAIRING_POLICY(source: Mapping[str, Any]) -> str | None:
+    """Return the reviewed pairing key, including explicit None when unpaired."""
+
+    del source
+    raise RuntimeError("AUTHORING_INCOMPLETE: implement PAIRING_POLICY")
+
+
+def _evaluation(role: str, facts: Mapping[str, Any], ownership: Mapping[str, str]):
+    return complete_evaluation(
+        evaluation_id=facts["evaluation_id"],
+        role=role,
+        evaluator_id=facts["evaluator_id"],
+        evaluator_version=facts["evaluator_version"],
+        evaluator_fingerprint_sha256=facts["evaluator_fingerprint_sha256"],
+        context_id=facts["context_id"],
+        context_fingerprint_sha256=facts["context_fingerprint_sha256"],
+        component_ownership=ownership,
+        component_values=facts["component_values"],
+        confirm_unlisted_not_applicable=facts["confirm_unlisted_not_applicable"],
+        provenance=facts["provenance"],
     )
-
-
-def add_optional_groups(packet: AssurancePacket) -> AssurancePacket:
-    # Add explicit critical, invariance, or anchor declarations here. This
-    # extension point intentionally creates none.
-    return packet
 
 
 def build_packet() -> AssurancePacket:
-    required = (
-        PARSER_OWNER,
-        AGGREGATION_POLICY_OWNER,
-        STATUS_MAPPING,
-        PAIRING_POLICY,
-        CONTEXT_DIFFERENCES,
-        ANCHOR_INTERPRETATION,
-    )
-    if any(value is None for value in required):
-        raise RuntimeError("TODO_REQUIRED: resolve every listed semantic choice")
-    if CONFIRM_UNLISTED_NOT_APPLICABLE is not True:
+    declarations = {
+        "score_spec": SCORE_SPEC,
+        "repeat_score_tolerance": REPEAT_SCORE_TOLERANCE,
+        "component_ownership": COMPONENT_OWNERSHIP,
+        "allowed_context_differences": ALLOWED_CONTEXT_DIFFERENCES,
+        "packet": PACKET,
+        "evaluations": EVALUATIONS,
+        "cases": CASES,
+        "trial_source": TRIAL_SOURCE,
+        "critical_groups": CRITICAL_GROUPS,
+        "invariance_groups": INVARIANCE_GROUPS,
+        "anchor_sets": ANCHOR_SETS,
+        "anchors": ANCHORS,
+    }
+    require_structural_completion(**declarations)
+    if not callable(STATUS_MAPPING) or not callable(PAIRING_POLICY):
         raise RuntimeError(
-            "TODO_REQUIRED: affirm every unlisted owned component is not applicable"
-        ){score_guard}
-    ownership = {{
-        "parser": PARSER_OWNER,
-        "aggregation_policy": AGGREGATION_POLICY_OWNER,
-    }}
-    # Public, deterministic machine surface for the exact required names.
+            "AUTHORING_INCOMPLETE: STATUS_MAPPING and PAIRING_POLICY must be callable"
+        )
+    ownership = dict(COMPONENT_OWNERSHIP)
     component_requirements(ownership)
-    score_spec = {score_todo}
-    judgment_spec = {{
-        "judgment_spec_id": "TODO_EXPLICIT_JUDGMENT_SPEC_ID",
-        "kind": JUDGMENT_KIND,
-        "label_space": LABEL_SPACE,
-        "score_spec": score_spec,
-        "repeat_score_tolerance": None,
-    }}
-    baseline = make_evaluation(
-        evaluation_id="TODO_BASELINE_EVALUATION_ID",
-        role="baseline",
-        evaluator_id="TODO_BASELINE_EVALUATOR_ID",
-        evaluator_version="TODO_BASELINE_VERSION",
-        evaluator_fingerprint_sha256=sha256_bytes(
-            b"TODO_REPLACE_WITH_EXACT_BASELINE_FINGERPRINT_BYTES"
-        ),
-        context_id="TODO_BASELINE_CONTEXT_ID",
-        context_fingerprint_sha256=sha256_bytes(
-            b"TODO_REPLACE_WITH_EXACT_BASELINE_CONTEXT_BYTES"
-        ),
-        component_ownership=ownership,
-        components=components_for("baseline", ownership),
-        provenance={{}},
-    )
-    candidate = make_evaluation(
-        evaluation_id="TODO_CANDIDATE_EVALUATION_ID",
-        role="candidate",
-        evaluator_id="TODO_CANDIDATE_EVALUATOR_ID",
-        evaluator_version="TODO_CANDIDATE_VERSION",
-        evaluator_fingerprint_sha256=sha256_bytes(
-            b"TODO_REPLACE_WITH_EXACT_CANDIDATE_FINGERPRINT_BYTES"
-        ),
-        context_id="TODO_CANDIDATE_CONTEXT_ID",
-        context_fingerprint_sha256=sha256_bytes(
-            b"TODO_REPLACE_WITH_EXACT_CANDIDATE_CONTEXT_BYTES"
-        ),
-        component_ownership=ownership,
-        components=components_for("candidate", ownership),
-        provenance={{}},
-    )
+    evaluations = [
+        _evaluation(role, EVALUATIONS[role], ownership)
+        for role in ("baseline", "candidate")
+    ]
     packet = AssurancePacket(
-        artifact_id="TODO_EXPLICIT_ARTIFACT_ID",
-        corpus_id="TODO_EXPLICIT_CORPUS_ID",
-        identity_level="content_hashes",
-        judgment_spec=judgment_spec,
-        evaluations=[baseline, candidate],
+        artifact_id=PACKET["artifact_id"],
+        corpus_id=PACKET["corpus_id"],
+        identity_level=PACKET["identity_level"],
+        judgment_spec={
+            "judgment_spec_id": PACKET["judgment_spec_id"],
+            "kind": JUDGMENT_KIND,
+            "label_space": LABEL_SPACE,
+            "score_spec": SCORE_SPEC,
+            "repeat_score_tolerance": REPEAT_SCORE_TOLERANCE,
+        },
+        evaluations=evaluations,
         component_ownership=ownership,
-        provenance={{}},
-        allowed_context_differences=CONTEXT_DIFFERENCES,
+        provenance=PACKET["provenance"],
+        allowed_context_differences=ALLOWED_CONTEXT_DIFFERENCES,
     )
-    packet.add_case(
-        "synthetic-case-1",
-        content_bytes=b"TODO_REPLACE_WITH_EXACT_SYNTHETIC_CASE_BYTES",
-    )
-    # These rows are already normalized to ScoreWitness semantics. Apply the
-    # explicit STATUS_MAPPING to source rows before constructing them.
+    packet.add_cases(CASES)
     evaluation_ids = packet.evaluation_ids_by_role
-    packet.add_trials(
-        [
-            {{
-                "case_id": "synthetic-case-1",
-                "evaluation_id": evaluation_ids["baseline"],
-                "trial_id": "synthetic-baseline-trial-1",
-                "source_order": 0,
-                "pairing_key": "synthetic-pair-1",
-                "status": "determinate",
-                "label": {example_label},
-                "score": {example_score},
-            }},
-            {{
-                "case_id": "synthetic-case-1",
-                "evaluation_id": evaluation_ids["candidate"],
-                "trial_id": "synthetic-candidate-trial-1",
-                "source_order": 0,
-                "pairing_key": "synthetic-pair-1",
-                "status": "determinate",
-                "label": {example_label},
-                "score": {example_score},
-            }},
-        ]
-    )
-    return add_optional_groups(packet)
+    normalized_trials = []
+    for source in TRIAL_SOURCE:
+        status_fields = dict(STATUS_MAPPING(source))
+        if set(status_fields) != {"status", "label", "score", "error"}:
+            raise RuntimeError(
+                "AUTHORING_INCOMPLETE: STATUS_MAPPING must return exactly "
+                "status, label, score, and error"
+            )
+        trial = {
+            key: source[key]
+            for key in ("case_id", "role", "trial_id", "source_order")
+        }
+        trial.update(status_fields)
+        trial["pairing_key"] = PAIRING_POLICY(source)
+        require_structural_completion(normalized_trial=trial)
+        role = trial.pop("role")
+        trial["evaluation_id"] = evaluation_ids[role]
+        normalized_trials.append(trial)
+    packet.add_trials(normalized_trials)
+    for declaration in CRITICAL_GROUPS:
+        packet.add_critical_group(**dict(declaration))
+    for declaration in INVARIANCE_GROUPS:
+        packet.add_invariance_group(**dict(declaration))
+    for declaration in ANCHOR_SETS:
+        packet.add_anchor_set(**dict(declaration))
+    packet.add_anchors(ANCHORS)
+    return packet
 
 
 def write_outputs(
@@ -368,6 +456,12 @@ def write_outputs(
 if __name__ == "__main__":
     build_packet().write(Path("evaluator-assurance.jsonl"))
 '''
+    return (
+        template.replace("__JUDGMENT_KIND__", repr(judgment))
+        .replace("__LABEL_SPACE__", labels_literal)
+        .replace("__SCORE_SPEC__", score_choice)
+        .replace("__REPEAT_SCORE_TOLERANCE__", tolerance_choice)
+    )
 
 
 def create_scaffold(*, judgment: str, labels: list[str], output: Path) -> Path:
@@ -396,6 +490,7 @@ def create_scaffold(*, judgment: str, labels: list[str], output: Path) -> Path:
         "producer_helpers": [
             "component_requirements",
             "complete_components",
+            "complete_evaluation",
             "make_evaluation",
             "AssurancePacket.add_cases",
             "AssurancePacket.add_trials",
@@ -407,9 +502,7 @@ def create_scaffold(*, judgment: str, labels: list[str], output: Path) -> Path:
         "contract_emitted": False,
         "undecided": list(_UNDECIDED),
     }
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent)
-    )
+    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
     completed = False
     try:
         (temporary / "README.md").write_text(
@@ -419,7 +512,9 @@ def create_scaffold(*, judgment: str, labels: list[str], output: Path) -> Path:
             _mapping(judgment, checked_labels), encoding="utf-8", newline="\n"
         )
         (temporary / "scaffold.json").write_text(
-            json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            json.dumps(
+                metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
             + "\n",
             encoding="utf-8",
             newline="\n",
