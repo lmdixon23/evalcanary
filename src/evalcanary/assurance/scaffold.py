@@ -68,9 +68,14 @@ It is not an assurance input, contract, acceptance policy, or migration result.
 - Explicit labels: {label_text}
 - State: `INERT_REQUIRES_SEMANTIC_CHOICES`
 
-## Required choices
+## SEMANTIC DECISIONS
 
 {todo}
+
+These decisions belong to the maintainer. The producer never determines
+whether component identities should change between evaluator versions. It also
+does not select status mappings, pairing, invariance, context exceptions,
+anchor interpretation, or acceptance policy.
 
 ## FIXED EVALUATOR COMPONENTS
 
@@ -96,12 +101,53 @@ calling `sha256_bytes`/`sha256_value` over exact local values. Do not derive
 them from display names, filenames, paths, imports, object representations,
 package metadata, the environment, or the clock.
 
+## MECHANICAL REPRESENTATION
+
 Edit `producer_mapping.py`. It contains one compact baseline/candidate/case/
-trial mapping with obvious synthetic placeholders and an optional group
-extension point. Its guard intentionally prevents output until all TODO choices
-and the bulk not-applicable affirmation are resolved. `AssurancePacket.write`
-validates through the normative runtime validator before atomically publishing
-JSONL.
+trial mapping with obvious synthetic placeholders, an optional group extension
+point, and `write_outputs(contract=...)`. Its guard intentionally prevents
+output until all TODO choices and the bulk not-applicable affirmation are
+resolved.
+
+The complete authoring path is:
+
+1. Define the semantic choices above.
+2. Create the explicit baseline and candidate evaluations.
+3. Create `AssurancePacket`.
+4. Add cases, trials, groups, and anchors.
+5. Write the finalized input with `input_path = packet.write(...)`.
+6. Author explicit keyword-only `Rule` values and a `Contract`.
+7. Write the contract with
+   `contract.write(contract_path, artifact=input_path)`.
+8. Run `evalcanary migrate --preflight ...`.
+9. Run `evalcanary migrate ...`.
+
+`write_outputs(contract=...)` performs steps 5 and 7 after `build_packet()`;
+the caller must supply the reviewed contract. The scaffold emits no rule or
+contract and does not claim that any example contract is appropriate.
+
+The keyword-only rule shape is:
+
+```python
+Rule(
+    rule_id=...,
+    severity=...,
+    scope=...,
+    scope_id=...,
+    metric=...,
+    parameters=...,
+    operator=...,
+    threshold=...,
+    missing_evidence=...,
+    rationale=...,
+)
+```
+
+Every value above is a semantic choice; no acceptance-policy defaults are
+provided. `AssurancePacket.write` validates through the normative runtime
+validator before atomically publishing JSONL. `Contract.write` accepts either
+that finalized path or an explicitly preloaded `AssuranceArtifact` and uses the
+same normative artifact validation path.
 
 Inspect the offline structural contracts with:
 
@@ -113,13 +159,15 @@ evalcanary schema contract
 Validate the completed artifact without evaluating policy or writing reports:
 
 ```console
-evalcanary migrate --preflight --input evaluator-assurance.jsonl
+evalcanary migrate --preflight --input evaluator-assurance.jsonl \
+  --contract evaluator-contract.json
 ```
 
 Generate the normal five-member report packet after preflight:
 
 ```console
-evalcanary migrate --input evaluator-assurance.jsonl --out report
+evalcanary migrate --input evaluator-assurance.jsonl \
+  --contract evaluator-contract.json --out report
 ```
 
 No contract template is emitted because this scaffold does not choose an
@@ -149,6 +197,7 @@ from pathlib import Path
 
 from evalcanary.assurance import (
     AssurancePacket,
+    Contract,
     complete_components,
     component_requirements,
     component_value,
@@ -275,11 +324,12 @@ def build_packet() -> AssurancePacket:
     )
     # These rows are already normalized to ScoreWitness semantics. Apply the
     # explicit STATUS_MAPPING to source rows before constructing them.
+    evaluation_ids = packet.evaluation_ids_by_role
     packet.add_trials(
         [
             {{
                 "case_id": "synthetic-case-1",
-                "evaluation_id": baseline.evaluation_id,
+                "evaluation_id": evaluation_ids["baseline"],
                 "trial_id": "synthetic-baseline-trial-1",
                 "source_order": 0,
                 "pairing_key": "synthetic-pair-1",
@@ -289,7 +339,7 @@ def build_packet() -> AssurancePacket:
             }},
             {{
                 "case_id": "synthetic-case-1",
-                "evaluation_id": candidate.evaluation_id,
+                "evaluation_id": evaluation_ids["candidate"],
                 "trial_id": "synthetic-candidate-trial-1",
                 "source_order": 0,
                 "pairing_key": "synthetic-pair-1",
@@ -300,6 +350,19 @@ def build_packet() -> AssurancePacket:
         ]
     )
     return add_optional_groups(packet)
+
+
+def write_outputs(
+    *,
+    contract: Contract,
+    input_path: Path = Path("evaluator-assurance.jsonl"),
+    contract_path: Path = Path("evaluator-contract.json"),
+) -> tuple[Path, Path]:
+    """Publish input and the caller-authored contract through the golden path."""
+
+    finalized_input = build_packet().write(input_path)
+    finalized_contract = contract.write(contract_path, artifact=finalized_input)
+    return finalized_input, finalized_contract
 
 
 if __name__ == "__main__":
