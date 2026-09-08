@@ -19,6 +19,7 @@ from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from ..errors import InputValidationError
@@ -343,7 +344,7 @@ def make_evaluation(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Rule:
     """One semantics-explicit contract rule from the closed metric vocabulary."""
 
@@ -434,15 +435,30 @@ class Contract:
 
         return canonical_json_bytes(self.document()) + b"\n"
 
-    def write(self, path: Path, *, artifact: AssuranceArtifact) -> Path:
-        """Normatively validate against an artifact, then atomically publish."""
+    def write(
+        self,
+        path: Path,
+        *,
+        artifact: AssuranceArtifact | str | os.PathLike[str],
+    ) -> Path:
+        """Validate against a loaded artifact or finalized input path, then publish.
 
+        Path-like inputs are loaded only through the normative ``load_artifact``
+        validator. Advanced callers may pass an already-loaded
+        ``AssuranceArtifact`` without reloading it.
+        """
+
+        loaded_artifact = (
+            artifact
+            if isinstance(artifact, AssuranceArtifact)
+            else load_artifact(_artifact_path(artifact))
+        )
         data = self.canonical_bytes()
         return _atomic_write_bytes(
             path,
             data,
             description="Contract output",
-            validator=lambda candidate: load_contract(candidate, artifact),
+            validator=lambda candidate: load_contract(candidate, loaded_artifact),
         )
 
 
@@ -479,6 +495,24 @@ class AssurancePacket:
         self._invariance_groups: list[Record] = []
         self._anchor_sets: list[Record] = []
         self._anchors: list[Record] = []
+
+    @property
+    def evaluation_ids_by_role(self) -> Mapping[str, str]:
+        """Return the exact declared baseline/candidate IDs as a read-only mapping."""
+
+        by_role: dict[str, list[str]] = {"baseline": [], "candidate": []}
+        for evaluation in self._evaluations:
+            if evaluation.role in by_role:
+                by_role[evaluation.role].append(evaluation.evaluation_id)
+        if len(self._evaluations) != 2 or any(
+            len(by_role[role]) != 1 for role in ("baseline", "candidate")
+        ):
+            raise InputValidationError(
+                "Evaluation roles must contain exactly one baseline and one candidate."
+            )
+        return MappingProxyType(
+            {role: by_role[role][0] for role in ("baseline", "candidate")}
+        )
 
     def add_case(
         self,
@@ -776,6 +810,19 @@ class AssurancePacket:
 
 
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _artifact_path(value: str | os.PathLike[str]) -> Path:
+    if not isinstance(value, (str, os.PathLike)):
+        raise InputValidationError(
+            "Contract artifact must be an AssuranceArtifact or a path-like input."
+        )
+    try:
+        return Path(value)
+    except (OSError, TypeError, ValueError) as exc:
+        raise InputValidationError(
+            "Contract artifact path could not be interpreted safely."
+        ) from exc
 
 
 def _validate_target(path: Path) -> Path:

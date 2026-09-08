@@ -115,6 +115,59 @@ exceptions, anchor interpretation, and contract policy. It emits no contract.
 `sha256_bytes`, and `sha256_value`. Fingerprints remain required explicit
 inputs; the two hash helpers act only on exact values passed by the caller.
 
+### SEMANTIC DECISIONS
+
+Before authoring, a maintainer must decide the status mapping, parser and
+aggregation-policy ownership and identities, trial pairing, invariance
+relations, allowed context differences, anchor interpretation, and every
+contract rule. The producer never determines whether component identities
+should change between evaluator versions. It does not generate an acceptance
+policy or infer evaluator or policy identity.
+
+### MECHANICAL REPRESENTATION
+
+After those decisions are reviewed, the normal public authoring path is:
+
+1. Represent the explicit semantic choices.
+2. Create the baseline and candidate `Evaluation` values.
+3. Create `AssurancePacket` with both evaluations.
+4. Add normalized cases, trials, groups, and anchors. Use the packet's
+   read-only `evaluation_ids_by_role` property when those already-declared IDs
+   are needed for trial rows.
+5. Finalize the input with
+   `input_path = packet.write(Path("evaluator-assurance.jsonl"))`.
+6. Author explicit keyword-only `Rule` values and a `Contract`.
+7. Write the contract with
+   `contract.write(Path("evaluator-contract.json"), artifact=input_path)`.
+8. Run `evalcanary migrate --preflight --input evaluator-assurance.jsonl
+   --contract evaluator-contract.json`.
+9. Run `evalcanary migrate --input evaluator-assurance.jsonl --contract
+   evaluator-contract.json --out evaluator-assurance-report`.
+
+The normal rule constructor is deliberately explicit and keyword-only:
+
+```python
+Rule(
+    rule_id=rule_id,
+    severity=severity,
+    scope=scope,
+    scope_id=scope_id,
+    metric=metric,
+    parameters=parameters,
+    operator=operator,
+    threshold=threshold,
+    missing_evidence=missing_evidence,
+    rationale=rationale,
+)
+```
+
+Those names stand for reviewed user-supplied decisions; they are not product
+defaults or a suggested policy. `Contract.write(..., artifact=...)` accepts
+either an `AssuranceArtifact` already returned by `load_artifact` or a
+`str`/`os.PathLike[str]` for a finalized evaluator-assurance JSONL input. A
+path-like input is loaded through `load_artifact`; there is no second parser or
+weaker validation path.
+
 The complete locked component vocabulary is:
 
 | Inventory | Required names |
@@ -136,12 +189,12 @@ component facts are retained and contradictions are rejected. The result feeds
 `make_evaluation`, whose identity, role, ownership, component, and provenance
 arguments remain explicit.
 
-`Rule` requires metric, scope, scope ID, parameters, severity, operator,
-threshold, missing-evidence policy, and rationale. `Contract` fills only the
-schema binding, empty extensions, stable rule ordering, and atomic output; its
-`write(..., artifact=...)` path validates through the normative contract
-loader. `AssurancePacket.add_cases`, `add_trials`, and `add_anchors` remove
-only loops over already-semantic normalized objects.
+`Rule` requires keyword-only metric, scope, scope ID, parameters, severity,
+operator, threshold, missing-evidence policy, and rationale. `Contract` fills
+only the schema binding, empty extensions, stable rule ordering, and atomic
+output; its `write(..., artifact=...)` path validates through the normative
+artifact and contract loaders. `AssurancePacket.add_cases`, `add_trials`, and
+`add_anchors` remove only loops over already-semantic normalized objects.
 
 The producer never derives identity from names, files, imports, objects,
 environments, package metadata, or time, and it never selects status mappings,

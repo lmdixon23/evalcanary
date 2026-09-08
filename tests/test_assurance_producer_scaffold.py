@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
@@ -40,6 +41,7 @@ EXAMPLE_ROOT = (
     / "examples"
     / "assurance"
 )
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _small_packet(case_order: tuple[str, ...]) -> AssurancePacket:
@@ -72,6 +74,27 @@ def _small_packet(case_order: tuple[str, ...]) -> AssurancePacket:
                 label="pass",
             )
     return packet
+
+
+def _small_contract() -> Contract:
+    return Contract(
+        contract_id="compact-contract",
+        contract_version="1",
+        rules=[
+            Rule(
+                rule_id="no-new-errors",
+                severity="hard",
+                scope="all_cases",
+                scope_id=None,
+                metric="new_status_count",
+                operator="lte",
+                threshold=0,
+                parameters={"status": "error"},
+                missing_evidence="hard_fail",
+                rationale="Reject newly observed source errors.",
+            )
+        ],
+    )
 
 
 class AssuranceProducerScaffoldTests(unittest.TestCase):
@@ -288,24 +311,7 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             ],
             "extensions": {},
         }
-        compact = Contract(
-            contract_id="compact-contract",
-            contract_version="1",
-            rules=[
-                Rule(
-                    rule_id="no-new-errors",
-                    severity="hard",
-                    scope="all_cases",
-                    scope_id=None,
-                    metric="new_status_count",
-                    operator="lte",
-                    threshold=0,
-                    parameters={"status": "error"},
-                    missing_evidence="hard_fail",
-                    rationale="Reject newly observed source errors.",
-                )
-            ],
-        )
+        compact = _small_contract()
         self.assertEqual(compact.document(), direct)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -332,6 +338,76 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 contract_version="1",
                 rules=[],
             ).document()
+
+    def test_contract_write_accepts_object_and_path_with_byte_parity(self) -> None:
+        contract = _small_contract()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            input_path = _small_packet(("case-a",)).write(root / "input.jsonl")
+            artifact = load_artifact(input_path)
+            object_path = contract.write(root / "object.json", artifact=artifact)
+            path_path = contract.write(root / "path.json", artifact=input_path)
+            string_path = contract.write(root / "string.json", artifact=str(input_path))
+
+            self.assertEqual(object_path.read_bytes(), path_path.read_bytes())
+            self.assertEqual(path_path.read_bytes(), string_path.read_bytes())
+            self.assertEqual(
+                load_contract(object_path, artifact).document,
+                load_contract(path_path, artifact).document,
+            )
+
+    def test_contract_path_failure_is_normative_and_private_value_free(self) -> None:
+        secret = "PRIVATE_SOURCE_VALUE_MUST_NOT_APPEAR"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            invalid_path = root / "invalid.jsonl"
+            invalid_path.write_text(
+                json.dumps({"record_type": "header", "private_value": secret}) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(InputValidationError) as normative:
+                load_artifact(invalid_path)
+            output_path = root / "must-not-exist.json"
+            with self.assertRaises(InputValidationError) as bridged:
+                _small_contract().write(output_path, artifact=invalid_path)
+
+            self.assertEqual(str(bridged.exception), str(normative.exception))
+            self.assertNotIn(secret, str(bridged.exception))
+            self.assertFalse(output_path.exists())
+
+    def test_rule_is_keyword_only_and_retains_exact_semantics(self) -> None:
+        expected = _small_contract().document()["rules"][0]
+        self.assertEqual(next(iter(_small_contract().rules)).document(), expected)
+        with self.assertRaisesRegex(TypeError, "positional argument"):
+            Rule(
+                "no-new-errors",
+                "hard",
+                "all_cases",
+                None,
+                "new_status_count",
+                {"status": "error"},
+                "lte",
+                0,
+                "hard_fail",
+                "Reject newly observed source errors.",
+            )
+
+    def test_evaluation_ids_by_role_is_exact_and_read_only(self) -> None:
+        packet = _small_packet(("case-a",))
+        evaluation_ids = packet.evaluation_ids_by_role
+        self.assertEqual(
+            dict(evaluation_ids),
+            {"baseline": "eval-baseline", "candidate": "eval-candidate"},
+        )
+        with self.assertRaises(TypeError):
+            evaluation_ids["baseline"] = "mutated"
+        self.assertEqual(
+            packet.evaluation_ids_by_role["baseline"], "eval-baseline"
+        )
+
+    def test_authoring_bridge_adds_no_mandatory_runtime_dependency(self) -> None:
+        project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+        self.assertEqual(project["project"]["dependencies"], [])
 
     def test_equivalent_addition_orders_are_byte_identical(self) -> None:
         first = _small_packet(("case-b", "case-a"))
@@ -458,15 +534,100 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 self.assertIn('role="candidate"', mapping)
                 self.assertIn("packet.add_case(", mapping)
                 self.assertIn("packet.add_trials(", mapping)
+                self.assertIn("packet.evaluation_ids_by_role", mapping)
+                self.assertIn("def write_outputs(", mapping)
+                self.assertIn("artifact=finalized_input", mapping)
                 readme = (output / "README.md").read_text()
+                self.assertIn("SEMANTIC DECISIONS", readme)
+                self.assertIn("MECHANICAL REPRESENTATION", readme)
                 self.assertIn("FIXED EVALUATOR COMPONENTS", readme)
                 self.assertIn("FIXED CONTEXT COMPONENTS", readme)
                 self.assertIn("MOVABLE COMPONENTS", readme)
                 self.assertIn("response_order", readme)
                 self.assertIn("sampling_settings", readme)
+                self.assertIn(
+                    "never determines\nwhether component identities should change",
+                    readme,
+                )
+                self.assertIn("contract.write(contract_path, artifact=input_path)", readme)
+                self.assertIn("explicit keyword-only `Rule`", readme)
                 self.assertIn("evalcanary migrate --preflight", readme)
                 self.assertIn("evalcanary migrate --input", readme)
                 self.assertFalse((output / "evaluator-assurance.jsonl").exists())
+
+    def test_scaffold_executes_the_documented_golden_authoring_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            scaffold = root / "scaffold"
+            self.assertEqual(
+                main(
+                    [
+                        "init",
+                        "--judgment",
+                        "categorical",
+                        "--label",
+                        "pass",
+                        "--label",
+                        "fail",
+                        "--out",
+                        str(scaffold),
+                    ]
+                ),
+                0,
+            )
+            mapping_path = scaffold / "producer_mapping.py"
+            namespace: dict[str, object] = {"__name__": "scaffold_under_test"}
+            exec(compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace)
+            namespace.update(
+                {
+                    "PARSER_OWNER": "context",
+                    "AGGREGATION_POLICY_OWNER": "evaluator",
+                    "STATUS_MAPPING": {"pass": "determinate", "fail": "determinate"},
+                    "PAIRING_POLICY": "explicit-pairing-key",
+                    "CONTEXT_DIFFERENCES": [],
+                    "ANCHOR_INTERPRETATION": "no-anchors-in-synthetic-example",
+                    "CONFIRM_UNLISTED_NOT_APPLICABLE": True,
+                }
+            )
+            input_path, contract_path = namespace["write_outputs"](
+                contract=_small_contract(),
+                input_path=root / "evaluator-assurance.jsonl",
+                contract_path=root / "evaluator-contract.json",
+            )
+            artifact = load_artifact(input_path)
+            load_contract(contract_path, artifact)
+
+            for arguments in (
+                [
+                    "migrate",
+                    "--preflight",
+                    "--input",
+                    str(input_path),
+                    "--contract",
+                    str(contract_path),
+                ],
+                [
+                    "migrate",
+                    "--input",
+                    str(input_path),
+                    "--contract",
+                    str(contract_path),
+                    "--out",
+                    str(root / "report"),
+                ],
+            ):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(arguments), 0)
+            self.assertEqual(
+                {item.name for item in (root / "report").iterdir()},
+                {
+                    "report.json",
+                    "report.md",
+                    "report.html",
+                    "review-queue.json",
+                    "review-queue.md",
+                },
+            )
 
     def test_init_refuses_existing_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
