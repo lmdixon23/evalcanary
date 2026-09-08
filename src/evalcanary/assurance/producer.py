@@ -186,9 +186,7 @@ def complete_components(
             "confirm_unlisted_not_applicable=True."
         )
     expected_evaluator, expected_context, supplied_ownership = _requirements(ownership)
-    evaluator = _checked_component_map(
-        evaluator_components, "evaluator_components"
-    )
+    evaluator = _checked_component_map(evaluator_components, "evaluator_components")
     context = _checked_component_map(context_components, "context_components")
     duplicates = set(evaluator) & set(context)
     evaluator_unexpected = set(evaluator) - expected_evaluator
@@ -209,9 +207,7 @@ def complete_components(
         evaluator_components={
             name: deepcopy(evaluator[name]) for name in sorted(evaluator)
         },
-        context_components={
-            name: deepcopy(context[name]) for name in sorted(context)
-        },
+        context_components={name: deepcopy(context[name]) for name in sorted(context)},
     )
 
 
@@ -284,9 +280,7 @@ class Evaluation:
         supplied_names = set(checked_supplied)
         confirmed = set(confirmed_items)
         repeated_confirmations = {
-            name
-            for name, count in Counter(confirmed_items).items()
-            if count > 1
+            name for name, count in Counter(confirmed_items).items() if count > 1
         }
         duplicates = (supplied_names & confirmed) | repeated_confirmations
         declared = supplied_names | confirmed
@@ -341,6 +335,59 @@ def make_evaluation(
         evaluator_components=deepcopy(dict(components.evaluator_components)),
         context_components=deepcopy(dict(components.context_components)),
         provenance=_copy_map(provenance),
+    )
+
+
+def complete_evaluation(
+    *,
+    evaluation_id: str,
+    role: str,
+    evaluator_id: str,
+    evaluator_version: str,
+    evaluator_fingerprint_sha256: str,
+    context_id: str,
+    context_fingerprint_sha256: str,
+    component_ownership: Mapping[str, str],
+    component_values: Mapping[str, ComponentValue],
+    confirm_unlisted_not_applicable: bool,
+    provenance: Mapping[str, ComponentValue],
+) -> Evaluation:
+    """Create one evaluation from explicit ownership and flat component facts.
+
+    Fixed ownership comes from the locked vocabulary; ownership for each movable
+    component comes only from ``component_ownership``. Unlisted facts are filled
+    only after the caller's explicit bulk not-applicable affirmation.
+    """
+
+    evaluator_names, context_names, _ = _requirements(component_ownership)
+    checked = _checked_component_map(component_values, "component_values")
+    unexpected = set(checked) - evaluator_names - context_names
+    if unexpected:
+        raise InputValidationError(
+            "The flat component inventory contains unexpected names; "
+            f"unexpected={_name_list(unexpected)}."
+        )
+    completed = complete_components(
+        ownership=component_ownership,
+        evaluator_components={
+            name: value for name, value in checked.items() if name in evaluator_names
+        },
+        context_components={
+            name: value for name, value in checked.items() if name in context_names
+        },
+        confirm_unlisted_not_applicable=confirm_unlisted_not_applicable,
+    )
+    return make_evaluation(
+        evaluation_id=evaluation_id,
+        role=role,
+        evaluator_id=evaluator_id,
+        evaluator_version=evaluator_version,
+        evaluator_fingerprint_sha256=evaluator_fingerprint_sha256,
+        context_id=context_id,
+        context_fingerprint_sha256=context_fingerprint_sha256,
+        component_ownership=component_ownership,
+        components=completed,
+        provenance=provenance,
     )
 
 
@@ -475,7 +522,7 @@ class AssurancePacket:
         evaluations: Collection[Evaluation],
         component_ownership: Mapping[str, str],
         provenance: Mapping[str, ComponentValue],
-        allowed_context_differences: Sequence[Mapping[str, Any]] = (),
+        allowed_context_differences: Sequence[Mapping[str, Any]],
         extensions: Mapping[str, Any] | None = None,
     ) -> None:
         self._artifact_id = artifact_id
@@ -520,8 +567,8 @@ class AssurancePacket:
         *,
         content_sha256: str | None = None,
         content_bytes: bytes | None = None,
-        critical_group_ids: Collection[str] = (),
-        invariance_group_ids: Collection[str] = (),
+        critical_group_ids: Collection[str],
+        invariance_group_ids: Collection[str],
         tags: Collection[str] = (),
         display_label: str | None = None,
         extensions: Mapping[str, Any] | None = None,
@@ -530,7 +577,9 @@ class AssurancePacket:
             raise InputValidationError(
                 "Supply either content_sha256 or exact content_bytes, not both."
             )
-        digest = sha256_bytes(content_bytes) if content_bytes is not None else content_sha256
+        digest = (
+            sha256_bytes(content_bytes) if content_bytes is not None else content_sha256
+        )
         self._cases.append(
             {
                 "record_type": "case",
@@ -546,9 +595,7 @@ class AssurancePacket:
         )
         return self
 
-    def add_cases(
-        self, cases: Sequence[Mapping[str, Any]]
-    ) -> AssurancePacket:
+    def add_cases(self, cases: Sequence[Mapping[str, Any]]) -> AssurancePacket:
         """Add already-semantic normalized case declarations in one call."""
 
         for case in cases:
@@ -563,12 +610,12 @@ class AssurancePacket:
         trial_id: str,
         source_order: int,
         status: str,
-        pairing_key: str | None = None,
-        label: str | None = None,
-        score: Any = None,
+        pairing_key: str | None,
+        label: str | None,
+        score: Any,
+        error: Mapping[str, Any] | None,
         reason: str | None = None,
         details: Any = None,
-        error: Mapping[str, Any] | None = None,
         provenance: Mapping[str, ComponentValue] | None = None,
         extensions: Mapping[str, Any] | None = None,
     ) -> AssurancePacket:
@@ -592,9 +639,7 @@ class AssurancePacket:
         )
         return self
 
-    def add_trials(
-        self, trials: Sequence[Mapping[str, Any]]
-    ) -> AssurancePacket:
+    def add_trials(self, trials: Sequence[Mapping[str, Any]]) -> AssurancePacket:
         """Add already-semantic normalized trial declarations in one call."""
 
         for trial in trials:
@@ -725,9 +770,7 @@ class AssurancePacket:
         )
         return self
 
-    def add_anchors(
-        self, anchors: Sequence[Mapping[str, Any]]
-    ) -> AssurancePacket:
+    def add_anchors(self, anchors: Sequence[Mapping[str, Any]]) -> AssurancePacket:
         """Add already-semantic normalized anchor declarations in one call."""
 
         for anchor in anchors:
@@ -796,7 +839,9 @@ class AssurancePacket:
 
         records = self.canonical_records()
         data = b"\n".join(canonical_json_bytes(item) for item in records) + b"\n"
-        with tempfile.TemporaryDirectory(prefix="evalcanary-producer-validate-") as temp:
+        with tempfile.TemporaryDirectory(
+            prefix="evalcanary-producer-validate-"
+        ) as temp:
             candidate = Path(temp) / "candidate.jsonl"
             candidate.write_bytes(data)
             load_artifact(candidate, limits=limits)
@@ -846,7 +891,9 @@ def _validate_target(path: Path) -> Path:
                 "Producer output path could not be inspected safely."
             ) from exc
         if missing:
-            raise InputValidationError("Producer output topology changed during validation.")
+            raise InputValidationError(
+                "Producer output topology changed during validation."
+            )
         is_reparse = stat.S_ISLNK(info.st_mode) or bool(
             getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
         )
@@ -920,6 +967,7 @@ __all__ = [
     "Evaluation",
     "Rule",
     "complete_components",
+    "complete_evaluation",
     "component_requirements",
     "component_value",
     "make_evaluation",

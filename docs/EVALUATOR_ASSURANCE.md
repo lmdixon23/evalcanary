@@ -105,15 +105,24 @@ evalcanary init --judgment categorical --label pass --label fail --out assurance
 ```
 
 Numeric and `categorical_and_numeric` judgment choices are also supported. The
-scaffold is intentionally inert: mapping code stops at explicit TODOs for
-status mapping, parser/aggregation ownership, pairing, invariance, context
-exceptions, anchor interpretation, and contract policy. It emits no contract.
+scaffold is intentionally inert: typed unresolved markers cover evaluator,
+context, component, corpus, case, trial, group, and anchor declarations. All
+emitted records are built from those guarded declarations. Scaffold-specific
+sentinel text, bytes, and their digests are also blocked. Renaming marker text
+does not resolve a marker. The guard establishes explicit structural completion,
+not semantic truth or correctness, and the scaffold emits no contract.
 
-`evalcanary.assurance.producer` provides `AssurancePacket`, `Evaluation`,
+The canonical public hash-helper import is:
+
+```python
+from evalcanary.assurance import sha256_bytes, sha256_value
+```
+
+`evalcanary.assurance` also exports `AssurancePacket`, `Evaluation`,
 `ComponentInventories`, `Rule`, `Contract`, `component_requirements`,
-`complete_components`, `make_evaluation`, `component_value`,
-`sha256_bytes`, and `sha256_value`. Fingerprints remain required explicit
-inputs; the two hash helpers act only on exact values passed by the caller.
+`complete_components`, `complete_evaluation`, `make_evaluation`, and
+`component_value`. Fingerprints remain explicit inputs; the hash helpers act
+only on exact caller-supplied values.
 
 ### SEMANTIC DECISIONS
 
@@ -131,9 +140,12 @@ After those decisions are reviewed, the normal public authoring path is:
 1. Represent the explicit semantic choices.
 2. Create the baseline and candidate `Evaluation` values.
 3. Create `AssurancePacket` with both evaluations.
-4. Add normalized cases, trials, groups, and anchors. Use the packet's
-   read-only `evaluation_ids_by_role` property when those already-declared IDs
-   are needed for trial rows.
+4. Add normalized cases, trials, groups, and anchors. Every case supplies both
+   `critical_group_ids` and `invariance_group_ids`; these are the supported
+   case/group assignment mechanism. Every trial supplies `pairing_key`, `label`,
+   `score`, and `error`, including explicit `None` when the reviewed choice is
+   empty. Use the packet's read-only `evaluation_ids_by_role` property when the
+   already-declared evaluation IDs are needed for trial rows.
 5. Finalize the input with
    `input_path = packet.write(Path("evaluator-assurance.jsonl"))`.
 6. Author explicit keyword-only `Rule` values and a `Contract`.
@@ -189,6 +201,13 @@ component facts are retained and contradictions are rejected. The result feeds
 `make_evaluation`, whose identity, role, ownership, component, and provenance
 arguments remain explicit.
 
+`complete_evaluation(...)` is the compact equivalent when component facts are
+easier to maintain as one flat mapping. Fixed component ownership comes from
+the locked vocabulary; movable ownership comes only from the required
+`component_ownership` argument. The helper partitions those already-declared
+facts mechanically and requires the same explicit bulk not-applicable
+affirmation; it does not choose ownership, presence, identity, or provenance.
+
 `Rule` requires keyword-only metric, scope, scope ID, parameters, severity,
 operator, threshold, missing-evidence policy, and rationale. `Contract` fills
 only the schema binding, empty extensions, stable rule ordering, and atomic
@@ -196,12 +215,38 @@ output; its `write(..., artifact=...)` path validates through the normative
 artifact and contract loaders. `AssurancePacket.add_cases`, `add_trials`, and
 `add_anchors` remove only loops over already-semantic normalized objects.
 
+The exact case/group mechanism is:
+
+```python
+packet.add_case(
+    "case-a",
+    critical_group_ids=["release-blockers"],
+    invariance_group_ids=["paraphrase-pair"],
+)
+```
+
+Declare `release-blockers` with `packet.add_critical_group(...)` and
+`paraphrase-pair` with `packet.add_invariance_group(...)`. There is no
+`assign_case_groups` API. For compact maintained mappings, prefer
+`add_cases(...)` and `add_trials(...)` over repeated mechanical calls; each
+mapping still names every required semantic field.
+
 The producer never derives identity from names, files, imports, objects,
 environments, package metadata, or time, and it never selects status mappings,
 label polarity, pairing, ownership, invariance, context exceptions, or
 acceptance policy. Finalization orders records, computes the manifest, runs the
 normative runtime validator, and only then atomically writes the final JSONL
 artifact.
+
+The generated scaffold makes status and pairing causally explicit:
+`STATUS_MAPPING(source)` must return exactly `status`, `label`, `score`, and
+`error`, while `PAIRING_POLICY(source)` returns the exact pairing key or explicit
+`None`. Their results become the emitted trial fields. Both initial functions
+fail with `AUTHORING_INCOMPLETE`; they do not inspect external data or supply a
+hard-coded semantic outcome. Setting `INVARIANCE_GROUPS = []` explicitly selects
+no invariance relations. Setting both `ANCHOR_SETS = []` and `ANCHORS = []`
+explicitly selects no human anchors; otherwise the exact supplied declarations
+control output.
 
 ## Input schema
 
