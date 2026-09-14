@@ -790,6 +790,19 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 self.assertIn("evalcanary migrate --preflight", readme)
                 self.assertIn("evalcanary migrate --input", readme)
                 self.assertFalse((output / "evaluator-assurance.jsonl").exists())
+                namespace = {"__name__": "untouched_scaffold_under_test"}
+                exec(
+                    compile(mapping, str(output / "producer_mapping.py"), "exec"),
+                    namespace,
+                )
+                with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                    namespace["write_outputs"](
+                        contract=_small_contract(),
+                        input_path=output / "evaluator-assurance.jsonl",
+                        contract_path=output / "contract.json",
+                    )
+                self.assertFalse((output / "evaluator-assurance.jsonl").exists())
+                self.assertFalse((output / "contract.json").exists())
 
     def test_scaffold_guard_rejects_every_unresolved_semantic_class(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1011,6 +1024,266 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             namespace.update(incomplete_fields)
             with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
                 namespace["build_packet"]()
+
+    def test_known_sentinel_representations_fail_before_publication(self) -> None:
+        from evalcanary.assurance.scaffold import create_scaffold
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            create_scaffold(
+                judgment="categorical",
+                labels=["pass", "fail"],
+                output=root / "scaffold",
+            )
+            mapping_path = root / "scaffold" / "producer_mapping.py"
+            namespace = {"__name__": "sentinel_representations_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            markers = (
+                namespace["EVALUATIONS"]["candidate"]["evaluator_fingerprint_sha256"],
+                namespace["unresolved"]("new explicit fingerprint \u03bb"),
+            )
+            paths = (
+                [
+                    ("EVALUATIONS", role, field)
+                    for role in ("baseline", "candidate")
+                    for field in (
+                        "evaluator_fingerprint_sha256",
+                        "context_fingerprint_sha256",
+                    )
+                ]
+                + [
+                    ("EVALUATIONS", role, "component_values", "implementation", field)
+                    for role in ("baseline", "candidate")
+                    for field in ("identity", "sha256")
+                ]
+                + [
+                    ("CASES", 0, "content_bytes"),
+                    ("PACKET", "provenance", "nested"),
+                    ("LABEL_SPACE", 2),
+                    ("JUDGMENT_KIND",),
+                ]
+            )
+            for marker in markers:
+                forms = {
+                    "typed": marker,
+                    "text": marker.token,
+                    "bytes": marker.token.encode("utf-8"),
+                    "raw_digest": public_sha256_bytes(marker.token.encode("utf-8")),
+                    "canonical_digest": public_sha256_value(marker.token),
+                }
+                for (form, value), path in product(forms.items(), paths):
+                    with self.subTest(marker=marker.description, form=form, path=path):
+                        choices = _completed_scaffold_choices()
+                        choices["LABEL_SPACE"] = ["pass", "fail", "explicit-extra"]
+                        choices["JUDGMENT_KIND"] = "categorical"
+                        cursor = choices
+                        for key in path[:-1]:
+                            cursor = cursor[key]
+                        cursor[path[-1]] = (
+                            [{"tuple": (value,)}] if path[-1] == "nested" else value
+                        )
+                        namespace.update(choices)
+                        with self.assertRaisesRegex(
+                            RuntimeError, "AUTHORING_INCOMPLETE"
+                        ):
+                            namespace["write_outputs"](
+                                contract=_small_contract(),
+                                input_path=root
+                                / f"{markers.index(marker)}-{form}-{paths.index(path)}.jsonl",
+                                contract_path=root
+                                / f"{markers.index(marker)}-{form}-{paths.index(path)}.json",
+                            )
+                        self.assertFalse(
+                            (
+                                root
+                                / f"{markers.index(marker)}-{form}-{paths.index(path)}.jsonl"
+                            ).exists()
+                        )
+                        self.assertFalse(
+                            (
+                                root
+                                / f"{markers.index(marker)}-{form}-{paths.index(path)}.json"
+                            ).exists()
+                        )
+
+    def test_sentinel_callback_results_and_detached_flags_fail_closed(self) -> None:
+        from evalcanary.assurance.scaffold import create_scaffold
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            create_scaffold(
+                judgment="categorical",
+                labels=["pass", "fail"],
+                output=root / "scaffold",
+            )
+            mapping_path = root / "scaffold" / "producer_mapping.py"
+            namespace = {"__name__": "callback_sentinel_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            marker = namespace["EVALUATIONS"]["candidate"][
+                "evaluator_fingerprint_sha256"
+            ]
+            digest = public_sha256_value(marker.token)
+            for mode in ("pairing", "status", "detached"):
+                with self.subTest(mode=mode):
+                    choices = _completed_scaffold_choices()
+                    if mode == "pairing":
+                        choices["PAIRING_POLICY"] = lambda source: digest
+                    elif mode == "status":
+                        choices["STATUS_MAPPING"] = lambda source: {
+                            "status": "determinate",
+                            "label": digest,
+                            "score": None,
+                            "error": None,
+                        }
+                    else:
+                        choices["EVALUATIONS"]["candidate"][
+                            "evaluator_fingerprint_sha256"
+                        ] = digest
+                    namespace.update(choices)
+                    namespace.update(
+                        DECLARATIONS=_completed_scaffold_choices(),
+                        SEMANTIC_CHOICES_REVIEWED=True,
+                        STATUS_MAPPING_REVIEWED=True,
+                        PAIRING_POLICY_REVIEWED=True,
+                    )
+                    with self.assertRaisesRegex(RuntimeError, "AUTHORING_INCOMPLETE"):
+                        namespace["write_outputs"](
+                            contract=_small_contract(),
+                            input_path=root / f"{mode}.jsonl",
+                            contract_path=root / f"{mode}.json",
+                        )
+                    self.assertFalse((root / f"{mode}.jsonl").exists())
+                    self.assertFalse((root / f"{mode}.json").exists())
+
+    def test_scaffold_accepts_unrelated_strings_and_explicit_fingerprints(self) -> None:
+        from evalcanary.assurance.scaffold import create_scaffold
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            create_scaffold(
+                judgment="categorical",
+                labels=["pass", "fail"],
+                output=root / "scaffold",
+            )
+            mapping_path = root / "scaffold" / "producer_mapping.py"
+            namespace = {"__name__": "valid_fingerprint_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            for fingerprint in (
+                "0123456789abcdef" * 4,
+                public_sha256_bytes(b"exact caller-reviewed implementation bytes"),
+                public_sha256_value({"implementation": "explicit", "revision": 2}),
+            ):
+                with self.subTest(fingerprint=fingerprint):
+                    choices = _completed_scaffold_choices()
+                    choices["PACKET"]["artifact_id"] = (
+                        "TODO_EVALCANARY_SCAFFOLD:ordinary-user-identity"
+                    )
+                    choices["EVALUATIONS"]["candidate"][
+                        "evaluator_fingerprint_sha256"
+                    ] = fingerprint
+                    namespace.update(choices)
+                    input_path, contract_path = namespace["write_outputs"](
+                        contract=_small_contract(),
+                        input_path=root / f"{fingerprint}.jsonl",
+                        contract_path=root / f"{fingerprint}.json",
+                    )
+                    artifact = load_artifact(input_path)
+                    load_contract(contract_path, artifact)
+                    candidate = next(
+                        item
+                        for item in artifact.header["evaluations"]
+                        if item["role"] == "candidate"
+                    )
+                    self.assertEqual(
+                        candidate["evaluator_fingerprint_sha256"], fingerprint
+                    )
+                    with redirect_stdout(io.StringIO()):
+                        self.assertEqual(
+                            main(
+                                [
+                                    "migrate",
+                                    "--preflight",
+                                    "--input",
+                                    str(input_path),
+                                    "--contract",
+                                    str(contract_path),
+                                ]
+                            ),
+                            0,
+                        )
+
+    def test_public_collection_declarations_cannot_hide_sentinels(self) -> None:
+        from collections import UserList, deque
+
+        from evalcanary.assurance.scaffold import create_scaffold
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            create_scaffold(
+                judgment="categorical",
+                labels=["pass", "fail"],
+                output=root / "scaffold",
+            )
+            mapping_path = root / "scaffold" / "producer_mapping.py"
+            namespace = {"__name__": "collection_sentinel_under_test"}
+            exec(
+                compile(mapping_path.read_text(), str(mapping_path), "exec"), namespace
+            )
+            marker = namespace["EVALUATIONS"]["candidate"][
+                "evaluator_fingerprint_sha256"
+            ]
+            forms = (
+                marker,
+                marker.token,
+                marker.token.encode("utf-8"),
+                public_sha256_bytes(marker.token.encode("utf-8")),
+                public_sha256_value(marker.token),
+            )
+            for index, value in enumerate(forms):
+                for container in ("sequence", "mapping_keys", "key_view", "deque"):
+                    with self.subTest(form=index, container=container):
+                        choices = _completed_scaffold_choices()
+                        if container == "sequence":
+                            del choices["CASES"][0]["content_bytes"]
+                            choices["CASES"][0]["content_sha256"] = value
+                            choices["CASES"] = UserList(choices["CASES"])
+                        else:
+                            choices["CASES"][0]["tags"] = {
+                                "mapping_keys": {value: None},
+                                "key_view": {value: None}.keys(),
+                                "deque": deque([value]),
+                            }[container]
+                        namespace.update(choices)
+                        with self.assertRaisesRegex(
+                            RuntimeError, "AUTHORING_INCOMPLETE"
+                        ):
+                            namespace["write_outputs"](
+                                contract=_small_contract(),
+                                input_path=root / f"{index}-{container}.jsonl",
+                                contract_path=root / f"{index}-{container}.json",
+                            )
+                        self.assertFalse((root / f"{index}-{container}.jsonl").exists())
+                        self.assertFalse((root / f"{index}-{container}.json").exists())
+
+            choices = _completed_scaffold_choices()
+            choices["CASES"][0]["tags"] = {"ordinary-tag": None}
+            choices["CASES"] = UserList(choices["CASES"])
+            choices["TRIAL_SOURCE"] = UserList(choices["TRIAL_SOURCE"])
+            namespace.update(choices)
+            input_path, contract_path = namespace["write_outputs"](
+                contract=_small_contract(),
+                input_path=root / "explicit.jsonl",
+                contract_path=root / "explicit.json",
+            )
+            artifact = load_artifact(input_path)
+            load_contract(contract_path, artifact)
+            self.assertEqual(artifact.cases[0]["tags"], ["ordinary-tag"])
 
     def test_superficial_scaffold_sentinel_renaming_does_not_bypass_guard(
         self,

@@ -106,9 +106,12 @@ clock.
 Edit `producer_mapping.py`. Every unresolved declaration is a typed marker,
 including identities, ownership, component facts, context differences, cases,
 local trial rows, groups, and anchors. Scaffold-specific sentinel text, bytes,
-and their fingerprint digests are also blocked. Renaming marker descriptions
-cannot resolve them. The structural guard blocks output while any marker
-remains; the normative validator then checks the completed packet. Neither
+and the direct `sha256_bytes(token.encode("utf-8"))` and `sha256_value(token)`
+fingerprint digests are also blocked. This check recognizes only registered
+scaffold markers, not arbitrary strings or fingerprint provenance. Renaming
+marker descriptions cannot resolve them. The guard checks mapping keys/values
+and supported collections, including sequences used by the public producer.
+It blocks output while any marker remains; the normative validator then checks the completed packet. Neither
 check establishes that an author's substantive semantic choice is true or
 correct.
 
@@ -225,7 +228,7 @@ def _mapping(judgment: str, labels: list[str]) -> str:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -255,6 +258,7 @@ class _UnresolvedChoice:
         _SCAFFOLD_SENTINEL_TEXTS.add(self.token)
         _SCAFFOLD_SENTINEL_BYTES.add(self.token.encode("utf-8"))
         _SCAFFOLD_SENTINEL_DIGESTS.add(sha256_bytes(self.token.encode("utf-8")))
+        _SCAFFOLD_SENTINEL_DIGESTS.add(sha256_value(self.token))
 
 
 def unresolved(description: str) -> _UnresolvedChoice:
@@ -264,19 +268,19 @@ def unresolved(description: str) -> _UnresolvedChoice:
 def _unresolved_paths(value: Any, path: str) -> list[str]:
     if isinstance(value, _UnresolvedChoice):
         return [path]
-    if isinstance(value, str) and value in (
-        _SCAFFOLD_SENTINEL_TEXTS | _SCAFFOLD_SENTINEL_DIGESTS
-    ):
-        return [path]
-    if isinstance(value, bytes) and value in _SCAFFOLD_SENTINEL_BYTES:
-        return [path]
+    if isinstance(value, str):
+        return [path] if value in (
+            _SCAFFOLD_SENTINEL_TEXTS | _SCAFFOLD_SENTINEL_DIGESTS
+        ) else []
+    if isinstance(value, bytes):
+        return [path] if value in _SCAFFOLD_SENTINEL_BYTES else []
     if isinstance(value, Mapping):
-        return [
-            nested
-            for key in sorted(value, key=str)
-            for nested in _unresolved_paths(value[key], f"{path}.{key}")
-        ]
-    if isinstance(value, (list, tuple, set, frozenset)):
+        missing = []
+        for key in sorted(value, key=str):
+            missing.extend(_unresolved_paths(key, f"{path}[key]"))
+            missing.extend(_unresolved_paths(value[key], f"{path}.{key}"))
+        return missing
+    if isinstance(value, Collection):
         return [
             nested
             for index, item in enumerate(value)
@@ -369,6 +373,8 @@ def _evaluation(role: str, facts: Mapping[str, Any], ownership: Mapping[str, str
 
 def build_packet() -> AssurancePacket:
     declarations = {
+        "judgment_kind": JUDGMENT_KIND,
+        "label_space": LABEL_SPACE,
         "score_spec": SCORE_SPEC,
         "repeat_score_tolerance": REPEAT_SCORE_TOLERANCE,
         "component_ownership": COMPONENT_OWNERSHIP,
