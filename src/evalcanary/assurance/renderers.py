@@ -16,6 +16,7 @@ from typing import Any
 
 from ..errors import InputValidationError
 from .numeric import canonical_json_bytes, canonical_json_text, iter_canonical_json
+from .numeric_projection import NUMERIC_NOTE, numeric_projection
 from .review_queue import (
     build_review_queue,
     review_queue_markdown,
@@ -454,9 +455,14 @@ def _projection_facts(
             ),
         )
     )
+    numeric = numeric_projection(
+        report, case_cap=_CASE_DETAIL_CAP, invariance_caps=_DETAIL_CAPS
+    )
+    projection_rows.extend(numeric["projection"])
     displayed = sum(int(item[2]) for item in projection_rows)
     omitted = sum(int(item[3]) for item in projection_rows)
     return {
+        "numeric_tables": numeric["tables"],
         "rules": rule_rows,
         "priority": priority_rows,
         "critical_summary": critical_summary,
@@ -761,6 +767,11 @@ def markdown_text(
             facts["cases"],
         )
     )
+    if facts["numeric_tables"]:
+        lines.extend([NUMERIC_NOTE, ""])
+        for caption, headers, rows in facts["numeric_tables"]:
+            lines.extend([f"### {caption}", ""])
+            lines.extend(_markdown_table(headers, rows))
     lines.extend(["## I. Limitations", ""])
     lines.extend(f"- {_markdown_cell(item)}" for item in report["limitations"])
     lines.append("")
@@ -999,6 +1010,12 @@ def html_text(
         f"Overall valid pairing coverage: {_ratio(pairing['pairing_coverage'])}; "
         f"incomplete cases: {len(pairing['incomplete_case_ids'])}."
     )
+    numeric_tables = ""
+    if facts["numeric_tables"]:
+        numeric_tables = f"<p>{html.escape(NUMERIC_NOTE)}</p>" + "".join(
+            _html_table(caption, headers, rows)
+            for caption, headers, rows in facts["numeric_tables"]
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1024,7 +1041,7 @@ pre {{ white-space:pre-wrap; overflow-wrap:anywhere }} a:focus-visible {{ outlin
 <section aria-labelledby="e-heading"><h2 id="e-heading">E. Invariance summary</h2>{invariance_table}<p>Bounded detail caps per role are: violated 50, not evaluable 25, satisfied 10.</p></section>
 <section aria-labelledby="f-heading"><h2 id="f-heading">F. Human-anchor summary</h2>{anchor_table}</section>
 <section aria-labelledby="g-heading"><h2 id="g-heading">G. Provenance and context changes</h2>{identity_table}{evaluation_table}{provenance_summary}{provenance_detail}{context_table}<h3>Typed public references</h3><ul>{links}</ul></section>
-<section aria-labelledby="h-heading"><h2 id="h-heading">H. Bounded detail</h2><p>The companion <code>report.json</code> is the exhaustive canonical record. Human projections deliberately omit repetitive rows.</p><p>Canonical JSON SHA-256: <code>{html.escape(canonical_json_sha256)}</code>. Bounded detail rows displayed: <code>{facts['displayed_detail_rows']}</code>; omitted: <code>{facts['omitted_detail_rows']}</code>.</p>{projection_table}{invariance_detail}{case_detail}</section>
+<section aria-labelledby="h-heading"><h2 id="h-heading">H. Bounded detail</h2><p>The companion <code>report.json</code> is the exhaustive canonical record. Human projections deliberately omit repetitive rows.</p><p>Canonical JSON SHA-256: <code>{html.escape(canonical_json_sha256)}</code>. Bounded detail rows displayed: <code>{facts['displayed_detail_rows']}</code>; omitted: <code>{facts['omitted_detail_rows']}</code>.</p>{projection_table}{invariance_detail}{case_detail}{numeric_tables}</section>
 <section aria-labelledby="i-heading"><h2 id="i-heading">I. Limitations</h2><ul>{limitations}</ul></section>
 </main></body></html>
 """

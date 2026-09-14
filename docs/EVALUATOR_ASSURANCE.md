@@ -399,3 +399,34 @@ references against validated source semantics. With `--before-report`,
 `--before-queue`, and `--queue`, it checks that the sole semantic report change is
 the added configuration, recomputes report/queue identities, resolves every queue
 pointer, and requires unchanged queue facts, ordering, ranks, and dispositions.
+
+## Reviewer numeric evidence
+
+Numeric Markdown and HTML reports share one bounded projection from canonical
+report facts. The paired-score table reuses the review queue's valid-pair
+selection and shows both scores, statuses, candidate-minus-baseline delta, and
+score completeness. Unavailable scores never become zero. The complete-pair
+summary includes all valid pairs in its counts, but only score-complete pairs in
+its exact sum and mean, with the denominator printed explicitly. This descriptive
+subset summary does not replace a contract metric or its missing-evidence policy.
+
+Numeric invariance rows resolve the already declared canonical member cases and
+instances, show numeric member counts and exact observed spreads, and read the
+absolute tolerance only from `relation_configuration`. Older reports without
+that additive field show the tolerance as unavailable. Unresolved or insufficient
+numeric instances are explicitly incomplete; the existing result is printed.
+Repeated-score rows show total and numeric counts, minimum, maximum, range, the
+existing repeat tolerance, and the existing canonical score-instability state.
+
+Arithmetic uses exact fractions of canonical decimal numbers. Terminating values
+use ordinary decimals without extra trailing zeros or negative zero; other means
+retain exact rational form. A positive or negative delta implies no quality,
+correctness, acceptance, severity, or regression judgment. No new pairing,
+invariance, instability, label-polarity, or missing-evidence decision is made.
+
+Paired-score and repeated-case-role detail each reuse the 25-row case-detail cap.
+Numeric invariance detail reuses the per-role caps: 50 violated, 25 not evaluable,
+and 10 satisfied. Each population declares total/displayed/omitted counts; sums
+and means cover the complete population even when detail is omitted. Categorical
+reports receive no numeric sections. HTML remains static and shares the same
+facts and escaping boundaries as Markdown; rendering never reopens source input.
