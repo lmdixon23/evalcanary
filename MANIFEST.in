@@ -26,3 +26,5 @@ include scripts/run_action.py
 include scripts/validate_mt_bench_case.py
 recursive-include src/evalcanary/assurance/schemas *.schema.json
 recursive-include src/evalcanary/examples/assurance *.jsonl *.md
+include scripts/verify_assurance_relations.py
+include tests/test_assurance_relation_configuration.py
