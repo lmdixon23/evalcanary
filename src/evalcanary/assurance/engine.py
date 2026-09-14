@@ -16,6 +16,7 @@ from .numeric import (
     decimal_to_fraction,
     fraction_facts,
 )
+from .relation_configuration import relation_configuration
 from .schema import AssuranceArtifact, AssuranceContract
 from .security import omission_facts, redact_text, safe_reportable_url
 
@@ -372,6 +373,9 @@ def _invariance_facts(
             {
                 "group_id": group["group_id"],
                 "expected_relation": group["expected_relation"],
+                "relation_configuration": relation_configuration(
+                    group, artifact.header["judgment_spec"]
+                ),
                 "severity": group["severity"],
                 "member_case_ids": group["member_case_ids"],
                 "roles": role_results,

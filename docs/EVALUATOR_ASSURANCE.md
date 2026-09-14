@@ -372,3 +372,30 @@ generator, or statistical inference engine. Benchmark-specific fixture
 preparation stays outside the generic product core and must independently pin
 licenses, revisions, byte hashes, decoder identity, row lineage, and prohibited
 operations.
+
+## Canonical invariance relation configuration
+
+Report-v1 invariance-group objects permit additive fields (`object_array` has
+object items with no closed property list). Existing fields keep their meanings;
+no schema identifier, engine version, input domain, or producer API changes are
+needed for the additive `relation_configuration` field.
+
+Each group retains its exact validated relation semantics:
+
+- `same_label`: `{}`.
+- `same_score_within_tolerance`: `{"absolute_tolerance": <exact number>}`.
+- `swapped_preference`: `first_label_index`, `second_label_index`, and
+  `tie_label_index` address the ordered canonical `judgment_spec.label_space`.
+  The tie index is null when omitted in the source declaration.
+
+Indices come from exact lookup in the validated declaration's label space, never
+from outcomes. The configuration contains only fixed keys, exact numbers,
+bounded integers, and null. It duplicates no label strings and needs no redaction.
+The already canonical label space and accepted label domain retain their existing
+behavior. Configuration is a semantic representation, not raw source parameters.
+
+`scripts/verify_assurance_relations.py INPUT REPORT` independently resolves these
+references against validated source semantics. With `--before-report`,
+`--before-queue`, and `--queue`, it checks that the sole semantic report change is
+the added configuration, recomputes report/queue identities, resolves every queue
+pointer, and requires unchanged queue facts, ordering, ranks, and dispositions.
