@@ -108,7 +108,13 @@ Numeric and `categorical_and_numeric` judgment choices are also supported. The
 scaffold is intentionally inert: typed unresolved markers cover evaluator,
 context, component, corpus, case, trial, group, and anchor declarations. All
 emitted records are built from those guarded declarations. Scaffold-specific
-sentinel text, bytes, and their digests are also blocked. Renaming marker text
+sentinel text, UTF-8 bytes, and the direct `sha256_bytes(token.encode("utf-8"))`
+and `sha256_value(token)` digests are also blocked. Only registered scaffold
+markers are recognized; unrelated strings and valid fingerprints remain allowed.
+The guard traverses mapping keys/values and supported collections, including
+public producer sequences, and checks judgment kind and label space.
+This structural check does not establish real-world fingerprint provenance or
+detect arbitrary transformations of marker data. Renaming marker text
 does not resolve a marker. The guard establishes explicit structural completion,
 not semantic truth or correctness, and the scaffold emits no contract.
 
