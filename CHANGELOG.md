@@ -3,6 +3,12 @@
 All notable changes are documented here. The project follows semantic
 versioning after the v0.x experimental series.
 
+## Unreleased
+
+- Added a read-only, offline `contract-review` command showing explicit contract
+  coverage and evidence availability with exact source binding and bounded detail.
+  Coverage observations do not rate policy sufficiency or evaluator safety.
+
 ## 0.1.1 - 2026-08-08
 
 ### Changed
