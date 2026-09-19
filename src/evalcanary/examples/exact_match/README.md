@@ -8,5 +8,5 @@ failure.
 Run:
 
 ```console
-evalcanary diff --data cases.jsonl --before verifier_before.py --after verifier_after.py --policy evalcanary.toml --slice metadata.domain --out report
+replaydocket diff --data cases.jsonl --before verifier_before.py --after verifier_after.py --policy evalcanary.toml --slice metadata.domain --out report
 ```

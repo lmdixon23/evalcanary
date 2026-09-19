@@ -37,7 +37,7 @@ def markdown_text(summary: ComparisonSummary) -> str:
     if summary.policy.get("configured"):
         policy_label = "PASS" if summary.policy.get("passed") else "FAIL"
     lines = [
-        "# EvalCanary evaluator migration report",
+        "# ReplayDocket evaluator migration report",
         "",
         f"- Run ID: `{summary.run_id}`",
         f"- Created: `{summary.created_at}`",
@@ -214,7 +214,7 @@ def html_text(summary: ComparisonSummary) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EvalCanary report {html.escape(summary.run_id)}</title>
+<title>ReplayDocket report {html.escape(summary.run_id)}</title>
 <style>
 :root {{ color-scheme: light dark; --bg:#f6f8fb; --panel:#fff; --text:#172b4d; --muted:#5d6b82; --line:#d8dee8; --accent:#d39b16; --pass:#137333; --fail:#b42318; --neutral:#5d6b82; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#101722; --panel:#182231; --text:#e9eef7; --muted:#aeb9ca; --line:#344258; --accent:#f0bd3d; --pass:#56c271; --fail:#ff8179; --neutral:#aeb9ca; }} }}
@@ -252,7 +252,7 @@ a:focus-visible, summary:focus-visible {{ outline:3px solid var(--accent); outli
 <body>
 <main>
 <header>
-<h1>EvalCanary evaluator migration report</h1>
+<h1>ReplayDocket evaluator migration report</h1>
 <p class="lede">A fixed-corpus comparison of two evaluator versions. Changed verdicts establish evaluator sensitivity; they do not establish which evaluator is correct.</p>
 <p><code>Run {html.escape(summary.run_id)}</code> - {html.escape(summary.created_at)}</p>
 </header>

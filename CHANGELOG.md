@@ -5,6 +5,11 @@ versioning after the v0.x experimental series.
 
 ## Unreleased
 
+- Adopted ReplayDocket as the public name beginning with v0.2 and `replaydocket`
+  as the future distribution name and preferred CLI. The `evalcanary` CLI,
+  Python imports, machine identities and historical repository remain supported.
+  See [installation and compatibility guidance](docs/MIGRATION.md).
+
 - Added a read-only, offline `contract-review` command showing explicit contract
   coverage and evidence availability with exact source binding and bounded detail.
   Coverage observations do not rate policy sufficiency or evaluator safety.

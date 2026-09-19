@@ -564,7 +564,7 @@ def markdown_text(
             ]
         )
     lines = [
-        "# EvalCanary evaluator-assurance report",
+        "# ReplayDocket evaluator-assurance report",
         "",
         "Contract-bound evidence for a frozen evaluator migration. This report does not decide which evaluator is correct.",
         "",
@@ -1022,7 +1022,7 @@ def html_text(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
-<title>EvalCanary assurance report {html.escape(str(report["report_id"]))}</title>
+<title>ReplayDocket assurance report {html.escape(str(report["report_id"]))}</title>
 <style>
 :root {{ color-scheme:light dark; --bg:#f5f7fa; --panel:#fff; --text:#172b4d; --muted:#526177; --line:#cbd3df; --focus:#a86800; }}
 @media (prefers-color-scheme:dark) {{ :root {{ --bg:#101722; --panel:#182231; --text:#edf2fa; --muted:#b6c1d2; --line:#43516a; --focus:#ffd166; }} }}
@@ -1033,7 +1033,7 @@ pre {{ white-space:pre-wrap; overflow-wrap:anywhere }} a:focus-visible {{ outlin
 </style>
 </head>
 <body><main>
-<header><h1>EvalCanary evaluator-assurance report</h1><p>Contract-bound evidence for a frozen evaluator migration. This report does not decide which evaluator is correct.</p></header>
+<header><h1>ReplayDocket evaluator-assurance report</h1><p>Contract-bound evidence for a frozen evaluator migration. This report does not decide which evaluator is correct.</p></header>
 <section aria-labelledby="a-heading"><h2 id="a-heading">A. Evidence, isolation, contract, and report status</h2>{status_table}</section>
 <section aria-labelledby="b-heading"><h2 id="b-heading">B. Decision summary</h2>{priority}{status_counts}{resources}<p>{pairing_summary}</p></section>
 <section aria-labelledby="c-heading"><h2 id="c-heading">C. Contract findings</h2>{contract_table}</section>

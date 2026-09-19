@@ -1,6 +1,6 @@
 # Code of conduct
 
-EvalCanary is a technical research and engineering project. Participation requires clear, evidence-based, respectful communication.
+ReplayDocket is a technical research and engineering project. Participation requires clear, evidence-based, respectful communication.
 
 - Critique claims, code, tests, interfaces, and decisions rather than people.
 - Separate observed behavior from inference.

@@ -1,27 +1,11 @@
-# Working-name clearance
+# Public-name decision
 
-Working name: EvalCanary
+EvalCanary is retired for new public-release branding because of material
+exact-name product overlap. Historical v0.1.0/v0.1.1 releases retain that name.
 
-Current evidence:
+ReplayDocket was selected after a recalibrated cross-round review. Known
+residual concerns involving EU DOCKET, EU REPLAY SOLUTIONS and related Replay
+and Docket developer products were accepted as a practical product decision.
 
-- no installed repository under the owner's account uses the name;
-- preliminary public GitHub and web searches did not identify an established project using EvalCanary as its principal product name;
-- one unrelated Go method uses `EvalCanary`, which is not presently a product-level collision.
-
-This is not legal clearance.
-
-Before public release, check:
-
-- GitHub repository and organization names;
-- PyPI, npm, crates.io, RubyGems, and container registries;
-- major domains and social handles;
-- general web search;
-- United States and European Union trademark databases;
-- relevant company and product databases.
-
-What would change the decision:
-
-- a mature evaluation or observability product using the same name;
-- a registered software trademark with overlapping scope;
-- package-name ownership that makes installation confusing;
-- a domain or search environment dominated by another product.
+Legal clearance is not claimed; this record does not imply counsel approval.
+See [migration guidance](MIGRATION.md) for the public compatibility boundary.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-EvalCanary is an evaluator reliability layer, not a general model-evaluation
+ReplayDocket is an evaluator reliability layer, not a general model-evaluation
 runner. Contributions should strengthen evaluator migration analysis,
 provenance, policies, integrations, or review quality.
 

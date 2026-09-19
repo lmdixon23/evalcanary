@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-title: EvalCanary
-message: If EvalCanary supports published research, cite the software and the exact release used.
+title: ReplayDocket
+message: If ReplayDocket supports published research, cite the software and the exact release used.
 type: software
 authors:
   - family-names: Dixon

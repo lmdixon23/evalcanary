@@ -1,10 +1,10 @@
-"""Typed exceptions used by EvalCanary."""
+"""Typed exceptions used by ReplayDocket."""
 
 from __future__ import annotations
 
 
 class EvalCanaryError(Exception):
-    """Base exception for expected EvalCanary failures."""
+    """Base exception for expected ReplayDocket failures."""
 
 
 class InputValidationError(EvalCanaryError):

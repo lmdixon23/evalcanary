@@ -410,7 +410,7 @@ catch {
 }
 
 Write-Host ''
-Write-Host 'EvalCanary publish summary'
+Write-Host 'ReplayDocket publish summary'
 Write-Host ('PASS: ' + $PassItems.Count) -ForegroundColor Green
 foreach ($Item in $PassItems) {
     Write-Host ('  PASS ' + $Item) -ForegroundColor Green

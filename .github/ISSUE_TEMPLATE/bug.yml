@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible EvalCanary defect using synthetic data.
+description: Report a reproducible ReplayDocket defect using synthetic data.
 title: "[Bug] "
 labels: [bug]
 body:
@@ -26,7 +26,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: EvalCanary version
+      label: ReplayDocket version
     validations:
       required: true
   - type: input

@@ -3,9 +3,9 @@ requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "evalcanary"
+name = "replaydocket"
 version = "0.1.1"
-description = "Catch evaluation drift before it ships."
+description = "Local evidence for evaluator migrations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -45,6 +45,7 @@ dev = [
 ]
 
 [project.scripts]
+replaydocket = "evalcanary.cli:main"
 evalcanary = "evalcanary.cli:main"
 
 [project.urls]

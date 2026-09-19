@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform entry point for the EvalCanary composite GitHub Action."""
+"""Cross-platform entry point for the ReplayDocket composite GitHub Action."""
 
 from __future__ import annotations
 

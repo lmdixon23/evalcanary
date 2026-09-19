@@ -30,3 +30,16 @@ include scripts/verify_assurance_relations.py
 include tests/test_assurance_relation_configuration.py
 include tests/test_assurance_numeric_projection.py
 include tests/test_assurance_contract_review.py
+
+# Complete maintained migration and release verification surfaces.
+include CHANGELOG.md CITATION.cff CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md action.yml
+recursive-include docs *.md *.png
+recursive-include scripts *.py *.ps1
+recursive-include tests *.py *.json
+recursive-include .github *.yml *.md
+prune _local
+prune .codex
+prune .venv
+prune build
+prune dist
+global-exclude *.py[cod] __pycache__

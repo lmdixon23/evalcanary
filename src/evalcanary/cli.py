@@ -1,4 +1,4 @@
-"""Command-line interface for EvalCanary."""
+"""Command-line interface for ReplayDocket."""
 
 from __future__ import annotations
 
@@ -33,13 +33,13 @@ EXIT_REVIEW_REQUIRED = 4
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="evalcanary",
-        description="Catch evaluation drift before it ships.",
+        prog="replaydocket",
+        description="ReplayDocket - Local evidence for evaluator migrations",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"EvalCanary {__version__}",
+        version=f"ReplayDocket {__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -233,7 +233,7 @@ def _run_diff(args: argparse.Namespace, argv: list[str]) -> int:
     write_html(summary, args.out / "report.html")
 
     changed = summary.pass_to_fail + summary.fail_to_pass
-    print("EvalCanary evaluator migration report")
+    print("ReplayDocket evaluator migration report")
     print(f"  cases: {summary.total_cases}")
     print(f"  comparable: {summary.comparable_cases}")
     print(f"  errors: {summary.error_cases}")
@@ -334,7 +334,7 @@ def _run_migrate(args: argparse.Namespace) -> int:
         limits=limits,
         source_paths=source_paths,
     )
-    print("EvalCanary evaluator-assurance report")
+    print("ReplayDocket evaluator-assurance report")
     print(f"  evidence: {report['evidence_status']}")
     print(f"  isolation: {report['isolation_status']}")
     print(f"  contract: {report['contract_status']}")
