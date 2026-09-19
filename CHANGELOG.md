@@ -9,6 +9,9 @@ versioning after the v0.x experimental series.
   coverage and evidence availability with exact source binding and bounded detail.
   Coverage observations do not rate policy sufficiency or evaluator safety.
 
+- Added advisory warnings for rules with identical evaluation fields, preserving
+  every human-authored rule and all existing validation and policy outcomes.
+
 ## 0.1.1 - 2026-08-08
 
 ### Changed

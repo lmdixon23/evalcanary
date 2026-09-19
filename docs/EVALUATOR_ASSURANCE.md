@@ -485,3 +485,25 @@ JSON output-byte limit is checked before stdout receives the payload. Review
 projection is linear in rules and trials apart from fixed vocabulary sorting;
 it reuses the existing report computation without changing its complexity.
 No public Python API or mandatory dependency is added.
+
+The same `contract-review` output includes one mechanical lint rule:
+`REPEATED_EVALUATION_FIELDS`. For each rule, it compares the exact canonical
+values of metric, scope, scope_id, parameters, operator, threshold, severity and
+missing_evidence with earlier rules. A repeated tuple produces one `WARNING`
+pointing to that rule and the first matching rule. Numeric canonicalization is
+exact; no rounding, threshold implication or label equivalence is inferred.
+Distinct operative fields, even superficially similar ones, are not flagged.
+
+`WARNING` here means a valid contract contains provably repeated evaluation
+fields. It does not mean a policy concern, that repetition was unintended, or
+that a rule can be removed. IDs, rationales and extensions may serve different
+human purposes; they are preserved. No automatic fixes or semantic
+recommendations are provided. The lint stage accepts only normatively valid
+contracts; malformed metrics, scopes, identities and parameters retain existing
+validation/preflight handling. There is no alternate permissive loader. Lint
+warnings do not change any policy result or command exit code.
+
+Lint findings follow rule order and use the same source binding, deterministic
+IDs, resolving contract pointers, 100-row cap and complete counts as coverage.
+The exact-key dictionary check is linear in the canonical rule field bytes; it
+performs no pairwise search, implication analysis or general logical solving.

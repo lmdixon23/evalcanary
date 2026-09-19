@@ -8,7 +8,7 @@ from typing import Any
 
 from .. import __version__
 from .constants import METRICS, ROLES, STATUSES
-from .numeric import canonical_sha256
+from .numeric import canonical_json_bytes, canonical_sha256
 from .preflight import MAX_PREFLIGHT_DIAGNOSTICS
 from .review_queue import _pointer, report_file_sha256
 from .schema import AssuranceContract, Limits
@@ -190,6 +190,46 @@ def _coverage(contract: AssuranceContract, report: dict[str, Any]) -> dict[str, 
     }
 
 
+def _lint(contract: AssuranceContract) -> dict[str, Any]:
+    fields = (
+        "metric",
+        "scope",
+        "scope_id",
+        "parameters",
+        "operator",
+        "threshold",
+        "severity",
+        "missing_evidence",
+    )
+    first: dict[bytes, int] = {}
+    findings = []
+    for index, rule in enumerate(contract.document["rules"]):
+        key = canonical_json_bytes({field: rule[field] for field in fields})
+        if key not in first:
+            first[key] = index
+            continue
+        findings.append(
+            _observation(
+                contract,
+                "contract_lint",
+                code="REPEATED_EVALUATION_FIELDS",
+                level="WARNING",
+                contract_pointer=_pointer("rules", index),
+                first_rule_pointer=_pointer("rules", first[key]),
+                message="These rules have identical evaluation fields. Their identities, rationales and metadata may serve different human purposes.",
+            )
+        )
+    return {
+        "stage": "NORMATIVELY_VALID_CONTRACT_ONLY",
+        "level_definitions": {
+            "WARNING": "A valid contract contains provably repeated evaluation fields; no policy concern or intent is inferred."
+        },
+        "operative_fields": list(fields),
+        "boundary": "No recommendation, contradiction inference, policy rating or automatic fix. Rule identities, rationales and extensions remain unchanged.",
+        **_bounded(findings),
+    }
+
+
 def _review_contract(
     contract: AssuranceContract, report: dict[str, Any]
 ) -> dict[str, Any]:
@@ -213,6 +253,7 @@ def _review_contract(
         "pointer_convention": "RFC 6901 against the exact contract; empty string is the contract root. Aggregate covered rows point to the first matching rule; absence rows point to root.",
         "ordering": "Metric, scope and role vocabulary is lexical; rule details follow contract array order. Counts include omitted rows.",
         "coverage": _coverage(contract, report),
+        "lint": _lint(contract),
     }
 
 
