@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .assurance._contract_review import _review_contract, _review_text
 from .assurance.engine import build_report as build_assurance_report
 from .assurance.engine import exit_code_for_report
 from .assurance.numeric import canonical_json_text
@@ -159,6 +160,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate inputs only; write no report packet and return only 0 or 3.",
     )
+
+    review = sub.add_parser(
+        "contract-review",
+        help="Show bounded advisory contract coverage on stdout; no policy rating or files.",
+    )
+    review.add_argument("--input", type=Path, required=True)
+    review.add_argument("--contract", type=Path, required=True)
+    review.add_argument("--limits", type=Path)
 
     schema = sub.add_parser(
         "schema",
@@ -334,6 +343,16 @@ def _run_migrate(args: argparse.Namespace) -> int:
     return exit_code_for_report(report)
 
 
+def _run_contract_review(args: argparse.Namespace) -> int:
+    limits = Limits.from_path(args.limits)
+    artifact = load_artifact(args.input, limits=limits)
+    contract = load_contract(args.contract, artifact)
+    assert contract is not None
+    report = build_assurance_report(artifact, contract)
+    sys.stdout.write(_review_text(_review_contract(contract, report), limits))
+    return EXIT_OK
+
+
 def _run_schema(args: argparse.Namespace) -> int:
     sys.stdout.write(canonical_schema_bytes(args.selector).decode("utf-8"))
     return EXIT_OK
@@ -362,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_demo(args)
         if args.command == "migrate":
             return _run_migrate(args)
+        if args.command == "contract-review":
+            return _run_contract_review(args)
         if args.command == "schema":
             return _run_schema(args)
         if args.command == "init":

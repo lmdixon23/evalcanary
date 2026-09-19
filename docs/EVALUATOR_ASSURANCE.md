@@ -430,3 +430,58 @@ and 10 satisfied. Each population declares total/displayed/omitted counts; sums
 and means cover the complete population even when detail is omitted. Categorical
 reports receive no numeric sections. HTML remains static and shares the same
 facts and escaping boundaries as Markdown; rendering never reopens source input.
+
+## Read-only contract review
+
+```console
+evalcanary contract-review --input evaluator-assurance.jsonl --contract evaluator-contract.json
+```
+
+This local/offline command writes one human-readable JSON review to stdout and
+creates no files. It uses the normal loaders, then derives evidence availability
+from the existing report engine. `--limits` accepts the existing bounded resource
+configuration. Exit 0 means the review completed; it is not a contract PASS.
+Invalid input/configuration returns 3 through the normal loader. Use
+`migrate --preflight` for existing authoring diagnostics and `migrate` for policy
+dispositions. This review does not change migration status, exit codes, reports,
+queue items, severities or the five-member publication/recovery protocol.
+
+Coverage denominators are explicit:
+
+- All 16 supported locked metric names, counting each name at most once.
+- Allowed metric/scope **types** from `METRIC_SIGNATURES`, crossed with baseline
+  and candidate only for metrics with an explicit role parameter. Null means
+  that the metric has no explicit role parameter. These rows do not enumerate
+  scope IDs or all possible label, status or other parameter combinations.
+- The eight registered role/trial-status combinations observed in this input.
+  Only the exact `all_cases` `status_count` selector counts as corresponding
+  coverage in this table; other metrics and subset selectors are not inferred
+  to address it. Zero trials means not observed in this input.
+
+Rule rows address the actual selections in the contract. Existing `missing`
+results become `not evaluable`, `not_applicable` becomes `not applicable`, and
+satisfied/violated results both have observed evidence. A rule with no result
+because the contract was not evaluated has `unknown` availability. None of
+these observations overrides its explicit missing-evidence policy.
+
+Covered does not mean sufficient; not covered does not mean bad or a defect.
+More rules do not mean better policy, all metrics covered does not establish
+safety, and not evaluable does not mean failed. Not observed is limited to the
+supplied evidence. Unknown and untested remain unknown and untested. There is
+no coverage score, quality rating, recommended rule or automatic policy change.
+
+`evaluator-assurance-contract-review-v1` binds the exact contract ID/version,
+contract SHA-256, input SHA-256, tool/report schema identity and canonical report
+identity/hash. Its RFC 6901 pointers address the exact contract: an empty pointer
+means the root for an absence observation, while a covered aggregate points to
+the first matching rule. Finding IDs hash the schema, exact contract hash and
+canonical mechanical observation. No timestamps or source paths are included.
+User-authored labels, rationales and extensions are not copied into the review.
+
+Vocabulary rows sort lexically; rule details follow source array order. Every
+collection reports total/displayed/omitted findings and uses the existing
+100-diagnostic cap. Aggregate counts always include omitted rows. The existing
+JSON output-byte limit is checked before stdout receives the payload. Review
+projection is linear in rules and trials apart from fixed vocabulary sorting;
+it reuses the existing report computation without changing its complexity.
+No public Python API or mandatory dependency is added.
