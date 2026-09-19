@@ -40,7 +40,7 @@ class ReportTests(unittest.TestCase):
             self.assertIn("@media (max-width:620px)", html_report)
             self.assertIn("Source diff omitted by default", html_report)
             self.assertNotIn("# before", html_report)
-            self.assertIn("EvalCanary evaluator migration report", markdown_text(summary))
+            self.assertIn("ReplayDocket evaluator migration report", markdown_text(summary))
 
 
 if __name__ == "__main__":

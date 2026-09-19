@@ -1,4 +1,4 @@
-name: EvalCanary Diff
+name: ReplayDocket Diff
 description: Compare two trusted Python evaluators against one fixed JSONL corpus.
 author: Logan M. Dixon
 
@@ -63,7 +63,7 @@ outputs:
     description: Absolute path to report.html.
     value: ${{ steps.diff.outputs.report_html }}
   run_id:
-    description: Content-derived EvalCanary run identifier.
+    description: Content-derived ReplayDocket run identifier.
     value: ${{ steps.diff.outputs.run_id }}
   changed_cases:
     description: Number of pass/fail verdict transitions.
@@ -75,7 +75,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install EvalCanary action source
+    - name: Install ReplayDocket action source
       shell: python
       env:
         EVALCANARY_ACTION_PATH: ${{ github.action_path }}

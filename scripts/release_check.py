@@ -71,7 +71,7 @@ def verify_release_metadata() -> str:
         raise RuntimeError("The repository must contain exactly one root action metadata file")
     action_text = metadata_paths[0].read_text(encoding="utf-8")
     required_action_fragments = (
-        "name: EvalCanary Diff",
+        "name: ReplayDocket Diff",
         "using: composite",
         "report_json:",
         "run_id:",
@@ -238,7 +238,7 @@ def main() -> int:
         fail_items.append(str(exc))
 
     print()
-    print("EvalCanary release-check summary")
+    print("ReplayDocket release-check summary")
     print(f"PASS: {len(pass_items)}")
     for item in pass_items:
         print(f"  PASS {item}")

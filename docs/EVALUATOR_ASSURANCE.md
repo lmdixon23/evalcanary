@@ -1,6 +1,6 @@
 # Evaluator-assurance development reference
 
-The `evalcanary migrate` command analyzes two sets of already-produced
+The `replaydocket migrate` command analyzes two sets of already-produced
 judgments over one frozen corpus. It is data-only: the command does not import,
 execute, or call an evaluator, model, benchmark, patch, container, or provider.
 The core uses the Python standard library and makes no network request.
@@ -12,7 +12,7 @@ certified, or causally responsible for an observed change.
 ## Command
 
 ```console
-evalcanary migrate \
+replaydocket migrate \
   --input evaluator-assurance.jsonl \
   [--contract evaluator-contract.json] \
   [--limits local-limits.json] \
@@ -67,7 +67,7 @@ trial, invariance-group, rule, and anchor subjects.
 Authoring preflight validates without evaluating policy or writing a packet:
 
 ```console
-evalcanary migrate --preflight --input evaluator-assurance.jsonl \
+replaydocket migrate --preflight --input evaluator-assurance.jsonl \
   [--contract evaluator-contract.json] [--limits local-limits.json]
 ```
 
@@ -81,10 +81,10 @@ The four bundled Draft 2020-12 schemas are available offline with stable URN
 identifiers:
 
 ```console
-evalcanary schema input-record
-evalcanary schema contract
-evalcanary schema report
-evalcanary schema review-queue
+replaydocket schema input-record
+replaydocket schema contract
+replaydocket schema report
+replaydocket schema review-queue
 ```
 
 `STRUCTURAL_SCHEMA` validates one JSON value's fields, types, enums, and
@@ -101,7 +101,7 @@ checked-in byte drift.
 Start an authoring directory without choosing migration policy:
 
 ```console
-evalcanary init --judgment categorical --label pass --label fail --out assurance-start
+replaydocket init --judgment categorical --label pass --label fail --out assurance-start
 ```
 
 Numeric and `categorical_and_numeric` judgment choices are also supported. The
@@ -157,9 +157,9 @@ After those decisions are reviewed, the normal public authoring path is:
 6. Author explicit keyword-only `Rule` values and a `Contract`.
 7. Write the contract with
    `contract.write(Path("evaluator-contract.json"), artifact=input_path)`.
-8. Run `evalcanary migrate --preflight --input evaluator-assurance.jsonl
+8. Run `replaydocket migrate --preflight --input evaluator-assurance.jsonl
    --contract evaluator-contract.json`.
-9. Run `evalcanary migrate --input evaluator-assurance.jsonl --contract
+9. Run `replaydocket migrate --input evaluator-assurance.jsonl --contract
    evaluator-contract.json --out evaluator-assurance-report`.
 
 The normal rule constructor is deliberately explicit and keyword-only:
@@ -434,7 +434,7 @@ facts and escaping boundaries as Markdown; rendering never reopens source input.
 ## Read-only contract review
 
 ```console
-evalcanary contract-review --input evaluator-assurance.jsonl --contract evaluator-contract.json
+replaydocket contract-review --input evaluator-assurance.jsonl --contract evaluator-contract.json
 ```
 
 This local/offline command writes one human-readable JSON review to stdout and

@@ -1,8 +1,8 @@
-# EvalCanary project design
+# ReplayDocket project design
 
 ## 1. Product definition
 
-EvalCanary is a local-first reliability layer for AI evaluations. Version 0.1 compares two trusted evaluator implementations against one fixed corpus of already-generated outputs.
+ReplayDocket is a local-first reliability layer for AI evaluations. Version 0.1 compares two trusted evaluator implementations against one fixed corpus of already-generated outputs.
 
 Primary proposition:
 
@@ -293,12 +293,14 @@ A breakout outcome is distribution-dependent. Adding features alone is insuffici
 
 ## 15. Branding
 
-The working brand is EvalCanary. The metaphor supports early warning without restricting the project to graders, deterministic verifiers, or benchmarks.
+The public name beginning with v0.2 is ReplayDocket, with the descriptor
+"Local evidence for evaluator migrations". Python imports and machine contracts
+retain their existing identifiers; see [migration guidance](MIGRATION.md).
 
 Initial command:
 
 ```console
-evalcanary diff
+replaydocket diff
 ```
 
 Possible later modules:
@@ -311,4 +313,5 @@ Possible later modules:
 - `slice`;
 - `migrate`.
 
-EvalCanary is now the public working brand. Repository and package-name searches found no material product collision before publication, but the record is not a legal trademark opinion and must be revisited before broader commercial use.
+Earlier v0.1.0/v0.1.1 releases remain EvalCanary. The current public-name decision
+is recorded in [NAME_CLEARANCE.md](NAME_CLEARANCE.md); legal clearance is not claimed.

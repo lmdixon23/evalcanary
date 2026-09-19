@@ -1,4 +1,4 @@
-"""EvalCanary: reliability testing for AI evaluations."""
+"""ReplayDocket: reliability testing for AI evaluations."""
 
 from __future__ import annotations
 

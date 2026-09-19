@@ -3,7 +3,7 @@
 
 Run this script with the target virtual environment's Python executable. It
 writes a .pth file that points to the repository's src directory and creates a
-small platform-native evalcanary launcher. No package index is required.
+small platform-native replaydocket and evalcanary launchers. No package index is required.
 """
 
 from __future__ import annotations
@@ -30,16 +30,16 @@ def site_packages() -> Path:
     return candidates[0]
 
 
-def write_launcher() -> Path:
+def write_launcher(name: str = "evalcanary") -> Path:
     executable = Path(sys.executable).absolute()
     if os.name == "nt":
-        launcher = executable.parent / "evalcanary.cmd"
+        launcher = executable.parent / f"{name}.cmd"
         launcher.write_text(
             '@"%~dp0python.exe" -m evalcanary %*\r\n',
             encoding="ascii",
         )
         return launcher
-    launcher = executable.parent / "evalcanary"
+    launcher = executable.parent / name
     launcher.write_text(
         f"#!{executable}\nfrom evalcanary.cli import main\nraise SystemExit(main())\n",
         encoding="utf-8",
@@ -56,7 +56,7 @@ def write_launcher() -> Path:
 def main() -> int:
     target = site_packages() / "evalcanary-local.pth"
     target.write_text(str(SRC.resolve()) + os.linesep, encoding="utf-8")
-    launcher = write_launcher()
+    launchers = [write_launcher(name) for name in ("replaydocket", "evalcanary")]
     completed = subprocess.run(
         [
             sys.executable,
@@ -72,10 +72,11 @@ def main() -> int:
         print(completed.stdout, end="")
         print(completed.stderr, end="", file=sys.stderr)
         return completed.returncode
-    print(f"EvalCanary {completed.stdout.strip()} local bootstrap complete.")
+    print(f"ReplayDocket {completed.stdout.strip()} local bootstrap complete.")
     print(f"  source: {SRC.resolve()}")
     print(f"  pth: {target}")
-    print(f"  launcher: {launcher}")
+    for launcher in launchers:
+        print(f"  launcher: {launcher}")
     return 0
 
 

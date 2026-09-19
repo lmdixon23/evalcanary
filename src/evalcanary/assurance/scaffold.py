@@ -57,9 +57,9 @@ def _readme(judgment: str, labels: list[str]) -> str:
         f"- `{item}`" for item in sorted(FIXED_CONTEXT_COMPONENTS)
     )
     movable_components = "\n".join(f"- `{item}`" for item in sorted(MOVABLE_COMPONENTS))
-    return f"""# EvalCanary evaluator-assurance scaffold
+    return f"""# ReplayDocket evaluator-assurance scaffold
 
-This inert scaffold records only the choices supplied to `evalcanary init`.
+This inert scaffold records only the choices supplied to `replaydocket init`.
 It is not an assurance input, contract, acceptance policy, or migration result.
 
 - Judgment kind: `{judgment}`
@@ -156,8 +156,8 @@ The complete authoring path is:
 6. Author explicit keyword-only `Rule` values and a `Contract`.
 7. Write the contract with
    `contract.write(contract_path, artifact=input_path)`.
-8. Run `evalcanary migrate --preflight ...`.
-9. Run `evalcanary migrate ...`.
+8. Run `replaydocket migrate --preflight ...`.
+9. Run `replaydocket migrate ...`.
 
 `write_outputs(contract=...)` performs steps 5 and 7 after `build_packet()`;
 the caller must supply the reviewed contract. The scaffold emits no rule or
@@ -189,21 +189,21 @@ same normative artifact validation path.
 Inspect the offline structural contracts with:
 
 ```console
-evalcanary schema input-record
-evalcanary schema contract
+replaydocket schema input-record
+replaydocket schema contract
 ```
 
 Validate the completed artifact without evaluating policy or writing reports:
 
 ```console
-evalcanary migrate --preflight --input evaluator-assurance.jsonl \
+replaydocket migrate --preflight --input evaluator-assurance.jsonl \
   --contract evaluator-contract.json
 ```
 
 Generate the normal five-member report packet after preflight:
 
 ```console
-evalcanary migrate --input evaluator-assurance.jsonl \
+replaydocket migrate --input evaluator-assurance.jsonl \
   --contract evaluator-contract.json --out report
 ```
 

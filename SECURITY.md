@@ -6,7 +6,10 @@ Security fixes target the latest release on the default branch during the v0.x s
 
 ## Critical boundary
 
-EvalCanary executes user-supplied Python verifier files. The child process reduces accidental state coupling, but it is not a security sandbox. A verifier can read files, access the network, consume resources, or execute operating-system commands with the current user's permissions.
+ReplayDocket's legacy `diff` workflow executes user-supplied Python verifier files. The child process reduces accidental state coupling, but it is not a security sandbox. A verifier can read files, access the network, consume resources, or execute operating-system commands with the current user's permissions.
+
+The data-only `migrate` workflow consumes frozen outputs and does not execute
+the evaluator or make network requests during report generation.
 
 Run only verifier code you trust. Use a container, virtual machine, or restricted operating-system account for untrusted code.
 

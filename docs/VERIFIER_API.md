@@ -55,11 +55,11 @@ Module-import or worker startup failures terminate the run.
 ## Execution boundary
 
 The worker process is not a sandbox. Verifiers have the current user's
-operating-system permissions. Use only trusted code or execute EvalCanary inside
+operating-system permissions. Use only trusted code or execute ReplayDocket inside
 an external sandbox.
 
 `--python` selects the interpreter used to execute the standard-library worker
-file and verifier. The selected interpreter does not need EvalCanary installed,
+file and verifier. The selected interpreter does not need ReplayDocket installed,
 but it must support Python 3.11 or later and contain the verifier's dependencies.
 
 ## Determinism guidance

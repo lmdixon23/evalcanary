@@ -787,8 +787,8 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                     "contract.write(contract_path, artifact=input_path)", readme
                 )
                 self.assertIn("explicit keyword-only `Rule`", readme)
-                self.assertIn("evalcanary migrate --preflight", readme)
-                self.assertIn("evalcanary migrate --input", readme)
+                self.assertIn("replaydocket migrate --preflight", readme)
+                self.assertIn("replaydocket migrate --input", readme)
                 self.assertFalse((output / "evaluator-assurance.jsonl").exists())
                 namespace = {"__name__": "untouched_scaffold_under_test"}
                 exec(

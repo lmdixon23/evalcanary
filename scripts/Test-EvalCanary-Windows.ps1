@@ -104,7 +104,7 @@ catch {
 }
 
 Write-Host ''
-Write-Host 'EvalCanary Windows verification summary'
+Write-Host 'ReplayDocket Windows verification summary'
 Write-Host ('PASS: ' + $PassItems.Count) -ForegroundColor Green
 foreach ($Item in $PassItems) {
     Write-Host ('  PASS ' + $Item) -ForegroundColor Green

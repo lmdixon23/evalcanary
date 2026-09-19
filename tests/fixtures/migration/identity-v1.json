@@ -1,0 +1,23 @@
+{
+  "schema_sha256": {
+    "evaluator-assurance-contract-v1.schema.json": "f5c6ea32cf0fc9f04601cb38c46744cc9e50ef14b17c8f18a7228c6016af94f5",
+    "evaluator-assurance-input-record-v1.schema.json": "ba4d8b56733634408d34ad193e930e62c6152cdb46e511b8e2cf42ca4a9021ed",
+    "evaluator-assurance-report-v1.schema.json": "bdb81bab02e11dbc0571e8267654ba261c1f2e1a38cae04d8b63e7afeecde8ee",
+    "evaluator-assurance-review-queue-v1.schema.json": "4b5520ed1092a5784f1029a80c3e64cac10a899f1960f25b77af218b643f3529"
+  },
+  "assurance_vectors": {
+    "false": {
+      "report_sha256": "9ef7cad1d30ab3ff48b9f79ceeedc8dd100215e801efb2345982e74d89377e36",
+      "queue_sha256": "183efab0a0f4c7064abeba04bd1392b8f39a17664ddac9f02d83fe94ed51e52f",
+      "report_id": "14772aa7dce4e73236ad3f74",
+      "report_status": "PASS"
+    },
+    "true": {
+      "report_sha256": "73735b98b328014045d51e2d4f0abd65550eae0d0f26d85377a9e58f63cc30f3",
+      "queue_sha256": "d3bec515c0261bf1a81e9d0d6ab85a0872fac7be09139b5aad36aee672b48219",
+      "report_id": "4c2a2c593cb5db0dd0ff441d",
+      "report_status": "PASS"
+    }
+  },
+  "historical_changelog_tail_sha256": "df7e74f8b10a872a433e115ed13eb01e9fe98cecee4eaf5f4cd1bec9482604b8"
+}
