@@ -163,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     review = sub.add_parser(
         "contract-review",
-        help="Show bounded advisory contract coverage on stdout; no policy rating or files.",
+        help="Show bounded advisory contract coverage and mechanical lint on stdout.",
     )
     review.add_argument("--input", type=Path, required=True)
     review.add_argument("--contract", type=Path, required=True)

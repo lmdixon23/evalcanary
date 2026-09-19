@@ -6,6 +6,8 @@ import io
 import json
 import tempfile
 import unittest
+from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -330,6 +332,168 @@ class ContractCoverageTests(unittest.TestCase):
                     3,
                 )
             self.assertEqual(output.getvalue(), "")
+
+
+class ContractLintTests(unittest.TestCase):
+    setUp = ContractCoverageTests.setUp
+    analyze = ContractCoverageTests.analyze
+
+    def test_duplicate_evaluation_fields_are_located_without_rewriting(self):
+        one = rule("corpus_equal")
+        two = dict(one, rule_id="another", rationale="A separate human purpose.")
+        review, report = self.analyze([one, two])
+        lint = review["lint"]
+        self.assertEqual(lint["total_findings"], 1)
+        self.assertEqual(len(report["rule_results"]), 2)
+        finding = lint["findings"][0]
+        self.assertEqual(finding["code"], "REPEATED_EVALUATION_FIELDS")
+        self.assertEqual(finding["level"], "WARNING")
+        self.assertEqual(finding["contract_pointer"], "/rules/1")
+        self.assertEqual(finding["first_rule_pointer"], "/rules/0")
+
+    def test_every_operative_field_near_neighbor_stays_unflagged(self):
+        base = rule(
+            "status_count",
+            parameters={"role": "candidate", "status": "error"},
+            threshold=1,
+        )
+        neighbors = [
+            dict(base, threshold=2),
+            dict(base, operator="ne"),
+            dict(base, severity="review", missing_evidence="review"),
+            dict(base, missing_evidence="info"),
+            dict(base, scope="critical_group", scope_id="critical-1"),
+            dict(base, parameters={"role": "baseline", "status": "error"}),
+            dict(base, parameters={"role": "candidate", "status": "abstain"}),
+            rule(
+                "determinate_label_count",
+                parameters={"role": "candidate", "label": "fail"},
+                threshold=1,
+            ),
+        ]
+        for index, neighbor in enumerate(neighbors):
+            with self.subTest(neighbor=index):
+                neighbor["rule_id"] = "distinct"
+                review, _ = self.analyze([base, neighbor])
+                self.assertEqual(review["lint"]["total_findings"], 0)
+        # Severity alone differs, with the same valid missing-evidence choice.
+        review, _ = self.analyze(
+            [
+                dict(base, missing_evidence="info"),
+                dict(
+                    base, rule_id="distinct", severity="review", missing_evidence="info"
+                ),
+            ]
+        )
+        self.assertEqual(review["lint"]["total_findings"], 0)
+        # Different valid owner IDs under the same provenance selector.
+        first = rule(
+            "provenance_present",
+            scope="provenance",
+            scope_id="eval-baseline",
+            parameters={"owner_type": "evaluation", "field": "evaluator_source"},
+        )
+        second = dict(first, rule_id="other", scope_id="eval-candidate")
+        review, _ = self.analyze([first, second])
+        self.assertEqual(review["lint"]["total_findings"], 0)
+
+    def test_exact_numbers_and_parameter_order_but_no_label_normalization(self):
+        first = rule(
+            "status_count",
+            parameters={"role": "candidate", "status": "error"},
+            threshold=Decimal("0.00"),
+        )
+        second = dict(
+            first,
+            rule_id="second",
+            threshold=Decimal("-0"),
+            parameters={"status": "error", "role": "candidate"},
+            extensions={"example.audit": {"purpose": "separate"}},
+        )
+        review, _ = self.analyze([first, second])
+        self.assertEqual(review["lint"]["total_findings"], 1)
+        first = rule(
+            "score_delta", threshold=Decimal("0.12345678901234567890123456789")
+        )
+        second = dict(
+            first,
+            rule_id="second",
+            threshold=Decimal("0.12345678901234567890123456790"),
+        )
+        review, _ = self.analyze([first, second], clone_records(numeric=True))
+        self.assertEqual(review["lint"]["total_findings"], 0)
+        first = rule(
+            "determinate_label_count", parameters={"role": "candidate", "label": "pass"}
+        )
+        second = dict(
+            first, rule_id="second", parameters={"role": "candidate", "label": "fail"}
+        )
+        review, _ = self.analyze([first, second])
+        self.assertEqual(review["lint"]["total_findings"], 0)
+
+    def test_opposed_predicates_are_not_semantic_lint(self):
+        first = rule("corpus_equal")
+        second = dict(first, rule_id="opposed", operator="ne")
+        review, report = self.analyze([first, second])
+        self.assertEqual(review["lint"]["total_findings"], 0)
+        self.assertEqual(report["contract_status"], "HARD_FAILURE")
+
+    def test_large_duplicate_groups_bind_first_rule_and_complete_counts(self):
+        rules = [dict(rule("corpus_equal"), rule_id=f"rule-{i}") for i in range(1024)]
+        review, _ = self.analyze(rules)
+        lint = review["lint"]
+        self.assertEqual(
+            (
+                lint["total_findings"],
+                lint["displayed_findings"],
+                lint["omitted_findings"],
+            ),
+            (1023, 100, 923),
+        )
+        for index, finding in enumerate(lint["findings"], start=1):
+            self.assertEqual(finding["contract_pointer"], f"/rules/{index}")
+            self.assertEqual(finding["first_rule_pointer"], "/rules/0")
+            self.assertEqual(
+                resolve_pointer(contract(*rules), finding["first_rule_pointer"]),
+                rules[0],
+            )
+            self.assertEqual(
+                resolve_pointer(contract(*rules), finding["contract_pointer"]),
+                rules[index],
+            )
+        self.assertEqual(len({r["finding_id"] for r in lint["findings"]}), 100)
+        self.assertLess(len(_review_text(review, Limits())), 150000)
+
+    def test_lint_ids_and_output_bind_exact_source_and_are_deterministic(self):
+        first = rule("corpus_equal")
+        second = dict(first, rule_id="second")
+        review, _ = self.analyze([first, second])
+        again, _ = self.analyze([first, second])
+        self.assertEqual(_review_text(review, Limits()), _review_text(again, Limits()))
+        second["rationale"] = "Same operative fields, different artifact bytes."
+        changed, _ = self.analyze([first, second])
+        self.assertNotEqual(
+            review["contract"]["source_sha256"], changed["contract"]["source_sha256"]
+        )
+        self.assertNotEqual(
+            review["lint"]["findings"][0]["finding_id"],
+            changed["lint"]["findings"][0]["finding_id"],
+        )
+
+    def test_categorical_numeric_mixed_and_all_missing_policies(self):
+        for items in (
+            clone_records(),
+            pure_numeric_records(),
+            clone_records(numeric=True),
+        ):
+            for missing in ("info", "review", "hard_fail"):
+                with self.subTest(
+                    kind=items[0]["judgment_spec"]["kind"], missing=missing
+                ):
+                    first = rule("score_delta", missing_evidence=missing)
+                    second = dict(first, rule_id="second")
+                    review, _ = self.analyze([first, second], deepcopy(items))
+                    self.assertEqual(review["lint"]["total_findings"], 1)
 
 
 if __name__ == "__main__":
