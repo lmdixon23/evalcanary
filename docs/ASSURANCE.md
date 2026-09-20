@@ -1,18 +1,18 @@
 # Product assurance record
 
-## Current 0.2 candidate boundary
+## Current 0.2 release boundary
 
 ReplayDocket 0.2 adds the data-only assurance workflow described in the
 [reference](EVALUATOR_ASSURANCE.md). Public brand and distribution changes
 preserve machine identities as explained in the [migration guide](MIGRATION.md).
 Local verification, human review, hosted CI, exact-tag canary and publication
-are distinct gates. The [release procedure](RELEASING.md) defines what remains
-necessary before publication; no candidate is declared released here.
+are distinct gates. The [release procedure](RELEASING.md) defines the checks and
+authorizations for release publication.
 
 ## Historical v0.1 assurance record
 
 The remaining record describes the original v0.1 construction and its then-open
-gates. It is preserved as history, not evidence that the current candidate has
+gates. It is preserved as history, not evidence that the current release has
 passed hosted CI or publication checks.
 
 ### Evidence status

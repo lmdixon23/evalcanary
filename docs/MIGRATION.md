@@ -2,9 +2,7 @@
 
 ReplayDocket is the public name beginning with v0.2; earlier v0.1.0/v0.1.1
 releases were published as EvalCanary. The descriptor is **Local evidence for
-evaluator migrations**. The current source prepares the 0.2.0 candidate.
-The citation release date remains unset until publication is authorized.
-No ReplayDocket release or package publication is implied by this source change.
+evaluator migrations**. The current ReplayDocket release is 0.2.0.
 
 ## Stable interfaces
 
@@ -40,7 +38,7 @@ The old evalcanary distribution and the new replaydocket distribution install
 the same evalcanary import files. Side-by-side installation is **not supported**:
 uninstalling either could remove shared files.
 
-Prefer a fresh environment and an explicitly supplied, verified candidate or release wheel:
+Prefer a fresh environment and an explicitly supplied, verified release wheel:
 
     python -m venv .venv
     .venv/bin/python -m pip install --no-deps /path/to/replaydocket-VERSION-py3-none-any.whl

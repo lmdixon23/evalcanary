@@ -6,15 +6,15 @@ Fixed-corpus trusted Python verifier replay, pass/fail transitions, paired
 statistics, slices, policy gates, provenance, local reports, and the composite
 GitHub Action remain supported. See the historical changelog for released scope.
 
-## ReplayDocket 0.2 candidate
+## Current release: ReplayDocket 0.2
 
-The current candidate adds offline frozen-judgment assurance: categorical and
+ReplayDocket 0.2 adds offline frozen-judgment assurance: categorical and
 numeric transitions, repeated evidence, explicit invariance relations and
 anchors, strict comparability, human-authored contracts, canonical reports and
 review queues, schemas, preflight, producer/scaffold authoring, and contract
-coverage review. Release hardening is in progress; this is not publication.
+coverage review.
 
-Product features are frozen for this candidate. Declared relations and repeated
+Product features are frozen for the 0.2 release. Declared relations and repeated
 trials are analyzed from supplied data; ReplayDocket does not generate
 perturbations or rerun models.
 

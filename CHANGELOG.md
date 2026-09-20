@@ -3,10 +3,7 @@
 All notable changes are documented here. The project follows semantic
 versioning after the v0.x experimental series.
 
-## 0.2.0 - Unreleased
-
-This entry describes the release candidate. The publication date will be set
-only when the release is authorized; it is not a release announcement.
+## 0.2.0 - 2026-09-21
 
 ### Added
 
@@ -50,8 +47,7 @@ only when the release is authorized; it is not a release announcement.
   Windows PowerShell 5.1 parser gate.
 
 The trusted-verifier `diff` workflow remains supported. Assurance results are
-review evidence, not automatic correctness certification. Hosted RC1 validation
-and publication remain separate gates.
+review evidence, not automatic correctness certification.
 
 ## 0.1.1 - 2026-08-08
 

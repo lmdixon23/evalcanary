@@ -47,9 +47,8 @@ outputs with their declared context and provenance; it does not rerun evaluators
 Requires Python 3.11 or later. The runtime has no third-party dependencies.
 These commands use the current source checkout. ReplayDocket is the successor
 public name beginning with v0.2; v0.1.0/v0.1.1 were released as EvalCanary.
-This checkout prepares the 0.2.0 release candidate; it is not yet a published
-release. Use the candidate checkout supplied for review until it is merged.
-Run the following commands from that checkout's root.
+This checkout contains ReplayDocket 0.2.0.
+Run the following commands from the repository root.
 
 ```console
 python -m venv .venv
@@ -68,7 +67,7 @@ py -m venv .venv
 
 Open `evalcanary-demo/report/report.html`.
 
-![Desktop report from the 0.2.0 candidate](docs/assets/replaydocket-demo-report.png)
+![Desktop report from ReplayDocket 0.2.0](docs/assets/replaydocket-demo-report.png)
 
 [Mobile capture](docs/assets/replaydocket-demo-mobile.png) /
 [Capture provenance](docs/assets/README.md). Both show the synthetic trusted-verifier
@@ -249,7 +248,7 @@ exit 4 for required review; see its reference.
 
 ## Public boundary
 
-The 0.2.0 candidate supports trusted deterministic Python verifier replay and
+ReplayDocket 0.2.0 supports trusted deterministic Python verifier replay and
 offline analysis of frozen categorical and numeric judgments. It does not provide:
 
 - an untrusted-code sandbox;
