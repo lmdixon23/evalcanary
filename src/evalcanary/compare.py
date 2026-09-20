@@ -181,7 +181,7 @@ def compare_verdicts(
 
     created = reproducible_now()
     limitations = (
-        "EvalCanary isolates evaluator effects only when the input-output corpus is fixed.",
+        "This comparison isolates evaluator effects only when the input-output corpus is fixed.",
         "A changed verdict is evidence of evaluator sensitivity, not automatic proof that either evaluator is correct.",
         "Python subprocess isolation is not a security sandbox; run only trusted verifier code.",
         "The bootstrap interval is a deterministic percentile estimate and should not replace domain review.",

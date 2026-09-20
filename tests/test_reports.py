@@ -31,7 +31,24 @@ class ReportTests(unittest.TestCase):
                 bootstrap_replicates=200,
             )
             summary = evaluate_policy(summary, {})
+            self.assertEqual(
+                summary.limitations,
+                (
+                    "This comparison isolates evaluator effects only when the input-output corpus is fixed.",
+                    "A changed verdict is evidence of evaluator sensitivity, not automatic proof that either evaluator is correct.",
+                    "Python subprocess isolation is not a security sandbox; run only trusted verifier code.",
+                    "The bootstrap interval is a deterministic percentile estimate and should not replace domain review.",
+                ),
+            )
+            self.assertEqual(summary.schema_version, "evalcanary-comparison-v1")
+            self.assertEqual(summary.provenance["tool"], "EvalCanary")
+            self.assertEqual(
+                summary.provenance["report_schema"], "evalcanary-comparison-v1"
+            )
             html_report = html_text(summary)
+            self.assertIn(summary.limitations[0], html_report)
+            self.assertIn(summary.limitations[0], markdown_text(summary))
+            self.assertIn("ReplayDocket evaluator migration report", html_report)
             self.assertIn("&lt;case&gt;", html_report)
             self.assertNotIn("secret", html_report)
             self.assertIn('aria-labelledby="transition-heading"', html_report)
