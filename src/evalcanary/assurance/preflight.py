@@ -285,7 +285,8 @@ def _scan_input(
     path: Path, limits: Limits, collector: _Collector
 ) -> AssuranceArtifact | None:
     try:
-        data = path.read_bytes()
+        with path.open("rb") as handle:
+            data = handle.read(limits.get("total_input_bytes") + 1)
     except OSError:
         collector.add(
             "SOURCE_UNREADABLE",
@@ -538,17 +539,28 @@ def _scan_contract(
     path: Path | None,
     artifact: AssuranceArtifact | None,
     collector: _Collector,
+    limits: Limits,
 ) -> None:
     if path is None:
         return
     try:
-        data = path.read_bytes()
+        with path.open("rb") as handle:
+            data = handle.read(limits.get("total_input_bytes") + 1)
     except OSError:
         collector.add(
             "SOURCE_UNREADABLE",
             "contract",
             "$",
             "readable local UTF-8 JSON contract",
+            CONTRACT_SCHEMA,
+        )
+        return
+    if len(data) > limits.get("total_input_bytes"):
+        collector.add(
+            "RESOURCE_LIMIT_EXCEEDED",
+            "contract",
+            "$",
+            "contract within configured total_input_bytes limit",
             CONTRACT_SCHEMA,
         )
         return
@@ -598,5 +610,5 @@ def preflight_paths(
         )
         limits = Limits()
     artifact = _scan_input(input_path, limits, collector)
-    _scan_contract(contract_path, artifact, collector)
+    _scan_contract(contract_path, artifact, collector, limits)
     return PreflightResult(tuple(collector.diagnostics), collector.omitted)
