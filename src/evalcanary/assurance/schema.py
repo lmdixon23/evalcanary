@@ -183,6 +183,8 @@ def _loads_strict(data: bytes, *, source: str) -> Any:
         raise InputValidationError(
             f"Invalid JSON in {source} at line {exc.lineno}, column {exc.colno}."
         ) from exc
+    except RecursionError as exc:
+        raise InputValidationError("JSON nesting exceeds the parser safety limit.") from exc
 
 
 def _object(value: Any, field_path: str) -> dict[str, Any]:
