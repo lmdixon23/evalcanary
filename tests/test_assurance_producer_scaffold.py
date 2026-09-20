@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tempfile
 import tomllib
 import unittest
@@ -579,12 +580,12 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
             )
 
     def test_contract_path_failure_is_normative_and_private_value_free(self) -> None:
-        secret = "PRIVATE_SOURCE_VALUE_MUST_NOT_APPEAR"
+        canary = "PRIVATE_SOURCE_VALUE_MUST_NOT_APPEAR"
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             invalid_path = root / "invalid.jsonl"
             invalid_path.write_text(
-                json.dumps({"record_type": "header", "private_value": secret}) + "\n",
+                json.dumps({"record_type": "header", "private_value": canary}) + "\n",
                 encoding="utf-8",
             )
             with self.assertRaises(InputValidationError) as normative:
@@ -594,7 +595,7 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
                 _small_contract().write(output_path, artifact=invalid_path)
 
             self.assertEqual(str(bridged.exception), str(normative.exception))
-            self.assertNotIn(secret, str(bridged.exception))
+            self.assertNotIn(canary, str(bridged.exception))
             self.assertFalse(output_path.exists())
 
     def test_rule_is_keyword_only_and_retains_exact_semantics(self) -> None:
@@ -640,8 +641,10 @@ class AssuranceProducerScaffoldTests(unittest.TestCase):
         packet = _small_packet(("case-a", "case-b"))
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "nested" / "assurance.jsonl"
-            self.assertEqual(packet.write(target), target.resolve())
-            artifact = load_artifact(target)
+            written = packet.write(target)
+            self.assertTrue(written.is_absolute())
+            self.assertTrue(os.path.samefile(written, target))
+            artifact = load_artifact(written)
         evaluations = {item["role"]: item for item in artifact.header["evaluations"]}
         self.assertEqual(
             evaluations["baseline"]["evaluator_fingerprint_sha256"],

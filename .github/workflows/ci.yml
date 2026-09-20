@@ -34,6 +34,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Diagnose and select a safe temporary root
+        env:
+          CHECKED_RUNNER_TEMP: ${{ runner.temp }}
+        run: python scripts/check_runner_temp.py
       - name: Windows PowerShell 5.1 parser gate
         if: runner.os == 'Windows' && matrix.python-version == '3.11'
         shell: powershell
@@ -70,6 +74,10 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Diagnose and select a safe temporary root
+        env:
+          CHECKED_RUNNER_TEMP: ${{ runner.temp }}
+        run: python scripts/check_runner_temp.py
       - name: Install package and development tools
         run: python -m pip install -e ".[dev]"
       - name: Ruff
@@ -77,7 +85,7 @@ jobs:
       - name: Mypy
         run: mypy
       - name: Pytest
-        run: pytest
+        run: python -m pytest
       - name: Build distributions
         run: python -m build
       - name: Verify extracted sdist full suite
@@ -136,6 +144,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - name: Diagnose and select a safe temporary root
+        env:
+          CHECKED_RUNNER_TEMP: ${{ runner.temp }}
+        run: python scripts/check_runner_temp.py
       - name: Run the repository action
         id: evalcanary
         uses: ./
@@ -234,6 +246,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - name: Diagnose and select a safe temporary root
+        env:
+          CHECKED_RUNNER_TEMP: ${{ runner.temp }}
+        run: python scripts/check_runner_temp.py
       - run: python scripts/release_check.py
       - run: python scripts/check_ascii_ps.py
 
