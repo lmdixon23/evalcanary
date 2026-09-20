@@ -1,4 +1,4 @@
-# Evaluator-assurance reference (0.2.0 candidate)
+# Evaluator-assurance reference (0.2.0)
 
 The `replaydocket migrate` command analyzes two sets of already-produced
 judgments over one frozen corpus. It is data-only: the command does not import,
