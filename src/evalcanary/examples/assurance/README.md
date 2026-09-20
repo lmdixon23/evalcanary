@@ -22,3 +22,40 @@ Regenerate them with:
 python scripts/generate_assurance_examples.py
 python scripts/generate_assurance_examples.py --check
 ```
+
+## Installed-package walkthrough
+
+Find the bundled directory without downloading data:
+
+```console
+python -c "from importlib.resources import files; print(files('evalcanary').joinpath('examples/assurance'))"
+```
+
+Replace EXAMPLES with that printed directory and use fresh output paths:
+
+```console
+replaydocket migrate --preflight --input EXAMPLES/numeric.jsonl
+replaydocket migrate --input EXAMPLES/numeric.jsonl --out numeric-assurance-report
+replaydocket schema input-record
+replaydocket schema contract
+replaydocket schema report
+replaydocket schema review-queue
+replaydocket init --judgment numeric --out assurance-start
+```
+
+The scaffold is inert until its unresolved semantic choices are supplied.
+No-contract execution can exit 0 with CONTRACT_NOT_CONFIGURED; that is not
+acceptance policy. To review a contract you have authored for an input:
+
+```console
+replaydocket contract-review --input EXAMPLES/numeric.jsonl --contract YOUR-CONTRACT.json
+replaydocket migrate --preflight --input EXAMPLES/numeric.jsonl --contract YOUR-CONTRACT.json
+replaydocket migrate --input EXAMPLES/numeric.jsonl --contract YOUR-CONTRACT.json --out contracted-assurance-report
+```
+
+Contract review writes bounded JSON to stdout and no packet. Exit 0 means
+review completed, not that the policy passes or covers everything necessary.
+Preflight also does not evaluate policy. Migrate exits 0 for pass/no contract,
+2 for hard failure, 4 for required review, and 3 for invalid/non-comparable input
+or handled execution failure. Command syntax errors use argparse exit 2.
+`evalcanary` and `python -m evalcanary` remain supported command aliases.

@@ -1,60 +1,39 @@
 # Roadmap
 
-## 0.1: EvalCanary Diff
+## Shipped history: EvalCanary 0.1
 
-- fixed JSONL corpus;
-- trusted Python verifier before and after;
-- pass/fail transition analysis;
-- paired statistics;
-- slices;
-- policy gates;
-- provenance;
-- JSON, Markdown, HTML;
-- local CLI and cross-platform GitHub Action;
-- Python 3.11–3.14 runtime matrix;
-- explicit quality, package, action-smoke, and branch-protection gates.
+Fixed-corpus trusted Python verifier replay, pass/fail transitions, paired
+statistics, slices, policy gates, provenance, local reports, and the composite
+GitHub Action remain supported. See the historical changelog for released scope.
 
-## 0.2: Integration evidence
+## ReplayDocket 0.2 candidate
 
-Only after external requests:
+The current candidate adds offline frozen-judgment assurance: categorical and
+numeric transitions, repeated evidence, explicit invariance relations and
+anchors, strict comparability, human-authored contracts, canonical reports and
+review queues, schemas, preflight, producer/scaffold authoring, and contract
+coverage review. Release hardening is in progress; this is not publication.
 
-- generic result-import adapter;
-- one Inspect adapter;
-- one Promptfoo adapter;
-- artifact-schema conformance tests;
-- critical-subset policies.
+Product features are frozen for this candidate. Declared relations and repeated
+trials are analyzed from supplied data; ReplayDocket does not generate
+perturbations or rerun models.
 
-## 0.3: Judge reliability
+## Demand-gated future work
 
-Only after a concrete judge-backed case study:
+These are deferred possibilities, not scheduled versions or current features:
 
-- repeated trials;
-- judge stability intervals;
-- inter-judge agreement;
-- prompt and model identity tracking;
-- cost and rate-limit controls.
+- adapters for Inspect, Promptfoo or other producers after concrete demand;
+- judge sampling, stability studies, provider/cost controls after a case study;
+- perturbation execution with explicit false-equivalence safeguards;
+- local comparison history, waivers, report browsing and attestable manifests.
 
-## 0.4: Invariance testing
+Hosted storage, automatic correctness certification and a general benchmark
+runner are outside the present product boundary.
 
-- deterministic perturbation interface;
-- user-defined transformations;
-- formatting and structured-output invariance;
-- perturbation provenance;
-- false-equivalence safeguards.
+## Requirements before a stable 1.0
 
-## 0.5: Local evaluation ledger
-
-- comparison history;
-- schema migrations;
-- local report browser;
-- signed or attestable manifests;
-- no hosted account requirement.
-
-## 1.0 gate
-
-- stable public schemas;
-- external benchmark adoption;
-- at least two independently maintained adapters;
-- documented threat model and security review;
-- sustained Windows, Linux, and macOS compatibility;
-- evidence that the product adds value beyond existing evaluation runners.
+- stable public schemas and explicit compatibility policy;
+- external adoption and independently maintained integrations;
+- a maintained threat model and security review;
+- sustained Windows, Linux and macOS verification;
+- evidence of useful migration review beyond existing evaluation runners.

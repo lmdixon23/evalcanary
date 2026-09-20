@@ -7,6 +7,8 @@
 
 **Local evidence for evaluator migrations**
 
+![ReplayDocket: paired evidence sheets and verdict transitions](docs/assets/replaydocket-featured-card.png)
+
 ReplayDocket compares evaluator/verifier versions and produces deterministic,
 reviewable evidence with provenance, explicit contracts and policy gates.
 
@@ -45,11 +47,11 @@ outputs with their declared context and provenance; it does not rerun evaluators
 Requires Python 3.11 or later. The runtime has no third-party dependencies.
 These commands use the current source checkout. ReplayDocket is the successor
 public name beginning with v0.2; v0.1.0/v0.1.1 were released as EvalCanary.
-The version remains 0.1.1 during migration preparation; this is not a v0.2 release.
+This checkout prepares the 0.2.0 release candidate; it is not yet a published
+release. Use the candidate checkout supplied for review until it is merged.
+Run the following commands from that checkout's root.
 
 ```console
-git clone https://github.com/lmdixon23/evalcanary.git
-cd evalcanary
 python -m venv .venv
 .venv/bin/python scripts/bootstrap_local.py
 .venv/bin/replaydocket demo --out evalcanary-demo
@@ -58,8 +60,6 @@ python -m venv .venv
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/lmdixon23/evalcanary.git
-Set-Location evalcanary
 py --version
 py -m venv .venv
 & .\.venv\Scripts\python.exe .\scripts\bootstrap_local.py
@@ -67,6 +67,33 @@ py -m venv .venv
 ```
 
 Open `evalcanary-demo/report/report.html`.
+
+![Desktop report from the 0.2.0 candidate](docs/assets/replaydocket-demo-report.png)
+
+[Mobile capture](docs/assets/replaydocket-demo-mobile.png) /
+[Capture provenance](docs/assets/README.md). Both show the synthetic trusted-verifier
+demo, not the data-only assurance report.
+
+
+## Try the bundled offline assurance example
+
+From the repository root, using the environment's `replaydocket` command
+(`.venv/bin/replaydocket` or `.\.venv\Scripts\replaydocket.cmd`):
+
+```console
+replaydocket migrate --preflight --input src/evalcanary/examples/assurance/numeric.jsonl
+replaydocket migrate --input src/evalcanary/examples/assurance/numeric.jsonl --out numeric-assurance-report
+```
+
+This synthetic example has no acceptance contract. Exit 0 with
+`CONTRACT_NOT_CONFIGURED` establishes completed evidence generation, not policy
+approval. Choose fresh output directories for examples; `demo` replaces its
+destination. For installed-package example locations and contract review, see
+the [packaged guide](src/evalcanary/examples/assurance/README.md).
+
+The public heading is ReplayDocket. Canonical evidence may still say
+`EvalCanary` in provenance and limitations; these are stable compatibility
+identities, explained in the [migration guide](docs/MIGRATION.md).
 
 ## Use the GitHub Action
 
@@ -173,12 +200,12 @@ the report audience. Original case payloads likewise require the separate
 report provenance and recorded commands; content hashes provide artifact
 identity.
 
-## Development: analyze a frozen evaluator migration
+## Analyze a frozen evaluator migration
 
 Compare frozen evaluator outputs across versions and produce deterministic,
 reviewable evidence without rerunning the evaluator.
 
-The development `migrate` path consumes a strict, data-only assurance artifact.
+The `migrate` path consumes a strict, data-only assurance artifact.
 It does not import or run evaluators, benchmark tasks, patches, or model output,
 and report generation makes no network request.
 
@@ -198,7 +225,7 @@ for the four offline structural contracts, and `init` for an inert scaffold.
 See the [evaluator-assurance reference](docs/EVALUATOR_ASSURANCE.md) for the
 schema boundary, privacy rules, resource limits, and exit statuses.
 
-## CI policy
+## CI policy for trusted-verifier diff
 
 ```toml
 [policy]
@@ -213,14 +240,17 @@ require_statistical_review_below_p = 0.05
 
 Exit codes:
 
-- `0`: comparison completed and the configured policy passed;
+- `0`: comparison completed with no policy, or the configured policy passed;
 - `2`: comparison completed and the configured policy failed;
 - `3`: input, execution, or configuration error.
 
+Command syntax errors also use exit 2. The separate `migrate` workflow uses
+exit 4 for required review; see its reference.
+
 ## Public boundary
 
-Version 0.1 supports trusted deterministic Python verifiers and pass/fail
-migration analysis. It does not yet provide:
+The 0.2.0 candidate supports trusted deterministic Python verifier replay and
+offline analysis of frozen categorical and numeric judgments. It does not provide:
 
 - an untrusted-code sandbox;
 - repeated LLM-judge sampling;

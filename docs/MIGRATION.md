@@ -2,15 +2,15 @@
 
 ReplayDocket is the public name beginning with v0.2; earlier v0.1.0/v0.1.1
 releases were published as EvalCanary. The descriptor is **Local evidence for
-evaluator migrations**. The current migration source still carries version
-0.1.1; final version and release-date preparation belongs to release hardening.
+evaluator migrations**. The current source prepares the 0.2.0 candidate.
+The citation release date remains unset until publication is authorized.
 No ReplayDocket release or package publication is implied by this source change.
 
 ## Stable interfaces
 
 | Surface | Supported identity |
 |---|---|
-| Future Python distribution | replaydocket |
+| Python distribution | replaydocket |
 | Preferred command | replaydocket |
 | Compatibility command | evalcanary (supported, not deprecated for v0.2) |
 | Python import | evalcanary |
@@ -40,7 +40,7 @@ The old evalcanary distribution and the new replaydocket distribution install
 the same evalcanary import files. Side-by-side installation is **not supported**:
 uninstalling either could remove shared files.
 
-Prefer a fresh environment and an explicitly supplied, verified migration wheel:
+Prefer a fresh environment and an explicitly supplied, verified candidate or release wheel:
 
     python -m venv .venv
     .venv/bin/python -m pip install --no-deps /path/to/replaydocket-VERSION-py3-none-any.whl
@@ -79,5 +79,6 @@ automatically certifies evaluator correctness.
 The tracked files docs/assets/evalcanary-demo-report.png,
 docs/assets/evalcanary-demo-mobile.png and docs/assets/evalcanary-featured-card.png
 are EvalCanary v0.1 imagery. They are not current ReplayDocket promotional assets.
-Replacement current screenshots and a featured card are required before they
-are used for ReplayDocket release presentation.
+New ReplayDocket assets use separate replaydocket-* filenames. See
+[asset provenance](assets/README.md) for candidate screenshot identity and
+capture instructions. The original images remain unchanged.
