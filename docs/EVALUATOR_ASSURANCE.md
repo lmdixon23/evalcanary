@@ -1,11 +1,11 @@
-# Evaluator-assurance development reference
+# Evaluator-assurance reference (0.2.0 candidate)
 
 The `replaydocket migrate` command analyzes two sets of already-produced
 judgments over one frozen corpus. It is data-only: the command does not import,
 execute, or call an evaluator, model, benchmark, patch, container, or provider.
 The core uses the Python standard library and makes no network request.
 
-This development interface is deliberately narrow. It produces evidence for a
+This interface is deliberately narrow. It produces evidence for a
 reviewer; it does not decide that an evaluator is correct, fair, safe, unbiased,
 certified, or causally responsible for an observed change.
 

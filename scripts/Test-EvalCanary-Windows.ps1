@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot = ''
+    [string]$ProjectRoot = '',
+    [switch]$ParseOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +58,11 @@ try {
         }
     }
     Add-Pass ('Repository PowerShell parser gate passed: ' + $Scripts.Count)
+
+    if ($ParseOnly) {
+        Write-Host ('PowerShell parser gate PASS: ' + $Scripts.Count + ' scripts; ' + $PSVersionTable.PSVersion)
+        exit 0
+    }
 
     $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
