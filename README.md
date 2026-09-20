@@ -91,9 +91,9 @@ approval. Choose fresh output directories for examples; `demo` replaces its
 destination. For installed-package example locations and contract review, see
 the [packaged guide](src/evalcanary/examples/assurance/README.md).
 
-The public heading is ReplayDocket. Canonical evidence may still say
-`EvalCanary` in provenance and limitations; these are stable compatibility
-identities, explained in the [migration guide](docs/MIGRATION.md).
+The public heading is ReplayDocket. Canonical provenance retains `EvalCanary`
+as a stable machine identity, explained in the [migration guide](docs/MIGRATION.md).
+Natural-language limitations describe the comparison and are not brand identities.
 
 ## Use the GitHub Action
 
